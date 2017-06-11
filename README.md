@@ -19,7 +19,7 @@ The platform will create individual media_player controls for each source and zo
 gain for that input.  Each Zone will be shown with a dropbox to select from the available zones and a volume slider to adjust the gain for that output.
 
 Basic configuration:
-'''
+```
 media_player:
    - platform: xap_controller
      path: /dev/ttyUSB-XAP800
@@ -43,7 +43,7 @@ media_player:
      sources:
        'Home Audio': 9
        'Family TV Audio': 11
-'''
+```
 
 zones: a list of output zone names, with a list one or more outputs for each zone
 sources: a list of source names, with a list of one source input number per source name.
