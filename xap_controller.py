@@ -118,7 +118,6 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         return False
 
     from XAPX00 import XAPX00
-
     xapconn = XAPX00.XAPX00(path)
 
     if config.get(CONF_STEREO, 1) == 0:
