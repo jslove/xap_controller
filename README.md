@@ -45,10 +45,10 @@ media_player:
        'Family TV Audio': 11
 ```
 
-zones: a list of output zone names, with a list one or more outputs for each zone
-sources: a list of source names, with a list of one source input number per source name.
-path: serial device path (can be a virtual serial port, using socat for example)
-name: the name of the platform instance
-stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the output and output+1
-baud: baud rate of serial port, default=38400
-scan_interval: how often to scane the unit for changes
+* zones: a list of output zone names, with a list one or more outputs for each zone
+* sources: a list of source names, with a list of one source input number per source name.
+* path: serial device path (can be a virtual serial port, using socat for example)
+* name: the name of the platform instance
+* stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the output and output+1
+* baud: baud rate of serial port, default=38400
+* scan_interval: how often to scane the unit for changes
