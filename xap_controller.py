@@ -244,7 +244,7 @@ class XAPZone(MediaPlayerDevice):
         self._sync_volume_level()
         self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
         _LOGGER.info("zone {} set up".format(zone_name))
-        self._poweroff_source = SRC_OFF
+        self._poweroff_source = self._active_source
 
     def update(self):
         self.get_mute_status()
@@ -301,18 +301,19 @@ class XAPZone(MediaPlayerDevice):
 
     def get_source(self):
         """ Get first active source for outputs in this zone """
-        _LOGGER.debug("In get_source")
+        _LOGGER.debug("In get_source for {}".format(self._name))
+        _LOGGER.debug("  Checking: {}".format(self._sources))
         for i in self._sources.keys():
             if i != SRC_OFF:
-                z_state = self._xapx00.getMatrixRouting(self._sources[i],
-                                                        self._outputs[0])
-                _LOGGER.debug("matrix rounting for {}={}". format(i, z_state))
+                z_state = int(self._xapx00.getMatrixRouting(self._sources[i],
+                                                        self._outputs[0]))
+                _LOGGER.debug("matrix routing for {}={}". format(i, z_state))
                 if z_state == 1:
                     self._active_source = i
                     break
             # if testing:
             #     actsrc = self._sources_reverse[1]
-        _LOGGER.debug("get_source = %s" % self._active_source)
+        _LOGGER.debug("get_source for %s = %s" % (self._name, self._active_source))
         return self._active_source
 
     def _sync_volume_level(self):
@@ -370,7 +371,7 @@ class XAPZone(MediaPlayerDevice):
         actsrc = self._active_source
         for xOut in self._outputs:
             if actsrc != SRC_OFF:
-                self._xapx00.setMatrixRouting(self._sources[actsrc], xOut, 0)
+                self._xapx00.setMatrixRouting(self._sources[actsrc], xOut, 0) #turn current off
             self._active_source = SRC_OFF
             if source in self._sources and source != SRC_OFF:
                 self._xapx00.setMatrixRouting(self._sources[source], xOut, 1)
@@ -379,8 +380,6 @@ class XAPZone(MediaPlayerDevice):
     @property
     def source_list(self):
         """List of available input sources."""
-        _LOGGER.debug("Source List, Active Source: {}".format(
-            self._active_source))
         return list(self._sources.keys())
 
     @property
