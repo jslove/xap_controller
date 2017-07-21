@@ -40,7 +40,7 @@ media_player:
      sources:
        'Home Audio': 9
        'Family TV Audio': 11
-       'Home Audio ExpBus': S
+
 
 zones: a list of output zone names, with a list one or more outputs for each zone
 sources: a list of source names, with a list of one source input number per source name.
@@ -149,7 +149,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
             hass, xapconn, source_name, source_input)
         add_devices([sourceobj])
         source_objs.append(sourceobj)
-        zonesources[source_name] = sourceobj.source_for_zones()
+        zonesources[source_name] = sourceobj
 
     zonesources[SRC_OFF] = 0
 
@@ -169,16 +169,29 @@ class XAPSource(MediaPlayerDevice):
         self._name = source_name
         self._xapx00 = xapconn
         self._state = STATE_ON
-        self._bus = None
-        self._unit = 0
+        self.xunit = 0
+        self.xinput = None
+        self.xgroup = "I"
+        self.xbus = None
+        self.xbusgroup = None
         self.parse_source(source_input)
         self._volume = self.get_volume_level()
         self._isMuted = self.get_mute_status()
+        _LOGGER.info("source {} set up".format(self.__str__()))
+
+    def __str__(self):
+        return self._name
+
+    def __repr__(self):
+        return "{} (Unit:{}, Input:{}, Bus:{}, Group:{})".format(self._name, self.xunit,
+                                                                self.xinput, self.xbus, self.xbusgrp)
 
     def parse_source(self, src):
-        "Fill in self's  input #, input unit, expansion bus"
+        "Fill in self's input #, input unit, expansion bus, expansion bus group"
+        XBUS = None
+        XBUSGRP = None
+        XUNIT = 0
         if type(src) is int:
-            XUNIT = 0
             XCHAN = src
         elif type(src) is str:
             if ":" in src:
@@ -186,28 +199,40 @@ class XAPSource(MediaPlayerDevice):
                 if comps == 1:
                     XCHAN, XUNIT =  src.split(":")
                 elif comps == 2:
-                    XCHAN, XUNIT, BUS = src.split(":")
+                    XCHAN, XUNIT, XBUS = src.split(":")
+                    XBUSGRP = 'E' # default to E
+                elif comps == 3:
+                    XCHAN, XUNIT, XBUS, XBUSGRP = src.split(":")                    
                 XCHAN = int(XCHAN)
                 XUNIT = int(XUNIT)
             elif src.isdigit():
-                XUNIT = 0
                 XCHAN = int(src)
             else:
                 raise Exception('Invalid Input String')
         else:
             # shouldn't be able to get here
             raise Exception('Invalid Source Input config format')
-        self._input = XCHAN
-        self._unit = XUNIT
-        self._bus = BUS 
+        self.xinput = XCHAN
+        self.xunit = XUNIT
+        self.xbus = XBUS
+        self.xbusgrp = XBUSGRP
         return
 
-    def source_for_zones(self):
-        if self._bus is not None:
-            group = 'E' if self._bus in self._xapx00.ExpansionChannels else 'P'
-            channel = self._bus
+    def getSource(self, outUnit):
+        if outUnit == self.xunit:
+            return self.xinput, self.xgroup
         else:
-            channel = self._input
+            if self.xbus is None:
+                raise Exception("Different unit but No Expansion Bus Defined")
+            return self.xbus, self.xbusgrp
+    
+    def source_for_zones(self):
+        if self.xbus is not None:
+            # either expansoin or processing
+            group = 'E' if self.xbus in self._xapx00.ExpansionChannels else 'P'
+            channel = self.xbus
+        else:
+            channel = self.xinput
             group = "I"
         return channel, group
     
@@ -238,35 +263,35 @@ class XAPSource(MediaPlayerDevice):
 
     def get_volume_level(self):
         """Volume level of the media player (0..1)."""
-        gain = self._xapx00.getPropGain(self._input, group="I", unitCode = self._unit)
+        gain = self._xapx00.getPropGain(self.xinput, group="I", unitCode = self.xunit)
         self._volume = gain
         return self._volume
 
     def set_volume_level(self, volume):
         """Set volume level, range 0..1."""
-        volume = self._xapx00.setPropGain(self._input, volume,
-                                          isAbsolute=1, group="I", unitCode = self._unit)
+        volume = self._xapx00.setPropGain(self.xinput, volume,
+                                          isAbsolute=1, group="I", unitCode = self.xunit)
         self._volume = volume
 
     def turn_on(self):
         """Turn the media player on."""
-        if self._xapx00.getMute(self._input, unitCode = self._unit) == 1:
-            self._isMuted = self._xapx00.setMute(self._input, isMuted=0, unitCode = self._unit)
+        if self._xapx00.getMute(self.xinput, unitCode = self.xunit) == 1:
+            self._isMuted = self._xapx00.setMute(self.xinput, isMuted=0, unitCode = self.xunit)
         self._state = STATE_ON
 
     def turn_off(self):
         """Turn off media player."""
-        if self._xapx00.getMute(self._input, unitCode=self._unit) == 0:
-            self._isMuted = self._xapx00.setMute(self._input, group="I",
-                                                 isMuted=1, unitCode = self._unit)
+        if self._xapx00.getMute(self._input, unitCode=self.xunit) == 0:
+            self._isMuted = self._xapx00.setMute(self.xinput, group="I",
+                                                 isMuted=1, unitCode = self.xunit)
         self._state = STATE_OFF
 
     def mute_volume(self, mute):
         """Toggle mute"""
-        self._isMuted = self._xapx00.setMute(self._input, group="I", isMuted=2, unitCode = self._unit)
+        self._isMuted = self._xapx00.setMute(self.xinput, group="I", isMuted=2, unitCode = self.xunit)
 
     def get_mute_status(self):
-        self._isMuted = self._xapx00.getMute(self._input, group="I", unitCode= self._unit)
+        self._isMuted = self._xapx00.getMute(self.xinput, group="I", unitCode= self.xunit)
         return self._isMuted
 
 
@@ -279,10 +304,9 @@ class XAPZone(MediaPlayerDevice):
         self._name = zone_name
         self._xapx00 = xapconn
         self._unitCode = unitCode
-        self._sources = sources  # a dict, source name to xap channel
-        self._sources_reverse = {v: k for k, v in sources.items()}
+        self._sources = sources #dict of source name:source obj
         self._outputs = outputs
-        # a list of outputs, each element can be a single int or
+        # outputs is a list of outputs, each element can be a single int or
         # a string of "int:int" (unit:output)
         self._volume = 0
         self._defaultMatrixLevel = 1
@@ -293,10 +317,12 @@ class XAPZone(MediaPlayerDevice):
         self.select_source(self._active_source)
         self._sync_volume_level()
         self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
-        _LOGGER.info("zone {} set up".format(zone_name))
+        _LOGGER.info("zone {} set up".format(self.__str__()))
         self._poweroff_source = self._active_source
 
-
+    def __str__(self):
+        return self._name
+        
     def parse_output(self, output):
         " return (unit,output) "
         if type(output) is int:
@@ -313,27 +339,6 @@ class XAPZone(MediaPlayerDevice):
             # shouldn't be able to get here
             raise Exception('Invalid Output config format')
         return int(XOUT), int(XUNIT)
-
-    def parse_source(self, src):
-        "Return source value and source group"
-        _LOGGER.debug('parse_source({})'.format(src))
-        return src
-        # if type(src[0]) is int:
-        #     XGRP = "I"
-        #     XIN = src
-        # elif type(src[0]) is str:
-        #     if ":" in src:
-        #         XIN, XGRP =  src.split(":")
-        #     elif src.isdigit():
-        #         XGRP = "I"
-        #         XIN = int(src)
-        #     else:
-        #         raise Exception('Invalid Input String')
-        # else:
-        #     # shouldn't be able to get here
-        #     raise Exception('Invalid Source Input config format')
-        # return XIN, XGRP
-                
             
     def update(self):
         self.get_mute_status()
@@ -377,15 +382,15 @@ class XAPZone(MediaPlayerDevice):
     def setDefaultLevel(self):
         """  set all crosspoint levels to default """
         for xOut in self._outputs:
-            XOUT, unit = self.parse_output(xOut)
-            for xIn in self._sources:
-                XIN, INGRP = self.parse_source(source)
+            XOUT, XUNIT = self.parse_output(xOut)
+            for xIn in self._sources.values():
+                XIN, XINGRP = xIn.getSource(XUNIT)
                 self._xapx00.setMatrixLevel(XIN,
                                             XOUT,
                                             self._defaultMatrixLevel,
-                                            inGroup = INGRP,
-                                            unitCode = unit)
-
+                                            inGroup =  XINGRP,
+                                            unitCode = XUNIT)
+#   not used
     def clear_matrix(self):
         """ set all crosspoints to off"""
         for xOut in self._outputs:
@@ -398,23 +403,20 @@ class XAPZone(MediaPlayerDevice):
 
     def get_source(self):
         """ Get first active source for outputs in this zone """
-        _LOGGER.debug("In get_source for {}".format(self._name))
+        _LOGGER.debug("In get_source for {}".format(self))
         _LOGGER.debug("  Checking: {}".format(self._sources))
-        for i in self._sources.keys():
-            if i != SRC_OFF:
-#                XIN, XINGRP = self.parse_source(self._sources[i])
-                XIN, XINGRP = self._sources[i]
+        for xIn in self._sources.values():
+            if xIn != self._sources[SRC_OFF]:
                 XOUT, XUNIT = self.parse_output(self._outputs[0])
+                XIN, XINGRP = xIn.getSource(XUNIT)
                 z_state = int(self._xapx00.getMatrixRouting(XIN,
                                                             XOUT,
                                                             inGroup = XINGRP,
                                                             unitCode = XUNIT))
-                _LOGGER.debug("matrix routing for {}={}". format(i, z_state))
-                if z_state == 1:
-                    self._active_source = i
+                _LOGGER.debug("matrix routing for {}={}". format(xIn, z_state))
+                if z_state > 0:
+                    self._active_source = xIn.__str__()
                     break
-            # if testing:
-            #     actsrc = self._sources_reverse[1]
         _LOGGER.debug("get_source for %s = %s" % (self._name, self._active_source))
         return self._active_source
 
@@ -425,8 +427,6 @@ class XAPZone(MediaPlayerDevice):
             XOUT, XUNIT = self.parse_output(self._outputs[0])
             volume = self._xapx00.getPropGain(XOUT, group="O",
                                               unitCode = XUNIT)
-            # volume = self._xapx00.getMatrixLevel(self._sources[
-            # self._active_source], self._outputs[0])
             self.set_volume_level(volume)
 
     def set_volume_level(self, volume):
@@ -436,8 +436,6 @@ class XAPZone(MediaPlayerDevice):
             _LOGGER.debug("Set Volume for output {}".format(output))
             volume = self._xapx00.setPropGain(XOUT, volume, group="O",
                                               unitCode = XUNIT)
-            # self._xapx00.setMatrixLevel(self._sources[self._active_source],
-            # output, volume)
         self._volume = volume
 
     def get_volume_level(self):
@@ -475,17 +473,19 @@ class XAPZone(MediaPlayerDevice):
 
     def select_source(self, source):
         """Set the input source"""
-        actsrc = self._active_source
-        _LOGGER.debug('select_source: source={}, actsrc = {}, self._sources={}'.format(source,actsrc,self._sources))
+        actsrc = self._active_source  # a string
+        _LOGGER.debug('select_source: source={}, actsrc = {}, self._sources={}'.format(
+            source, actsrc, self._sources))
         for xOut in self._outputs:
             XOUT, XUNIT = self.parse_output(xOut)
-            if actsrc != SRC_OFF:
-                XIN, XINGRP = self.parse_source(self._sources[actsrc])
+            if actsrc != SRC_OFF and actsrc != source:
+                XIN, XINGRP = self._sources[actsrc].getSource(XUNIT)
                 self._xapx00.setMatrixRouting(XIN, XOUT, 0, inGroup = XINGRP, unitCode = XUNIT) #turn current off
             self._active_source = SRC_OFF
-            if source in self._sources and source != SRC_OFF:
-                XIN, XINGRP = self.parse_source(self._sources[source])
-                self._xapx00.setMatrixRouting(XIN, XOUT, 1, inGroup = XINGRP, unitCode = XUNIT)
+            if source != SRC_OFF and source in self._sources:
+                XIN, XINGRP = self._sources[source].getSource(XUNIT)
+                ON=3 if (type(XIN) is int and XIN < 9) else 1  # if a mike input
+                self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup = XINGRP, unitCode = XUNIT)
                 self._active_source = source
 
     @property
