@@ -428,6 +428,7 @@ class XAPZone(MediaPlayerDevice):
                 ON=3 if (type(XIN) is int and XIN < 9) else 1  # if a mike input
                 self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup = XINGRP, unitCode = XUNIT)
                 self._active_source = source
+                self._poweroff_source = source # in case turn_on called without calling turn_off
             cnt += 1
 
     def get_source(self):
@@ -538,9 +539,10 @@ class XAPZone(MediaPlayerDevice):
     def turn_on(self):
         """Turn zone on"""
         _LOGGER.debug("turn_on {}".format(self))
-        self._state = STATE_ON
+#        if self._state != STATE_ON:
         self.select_source(self._poweroff_source)
         self.mute_volume(0)
+        self._state = STATE_ON
 
     def turn_off(self):
         """Turn off zone"""
