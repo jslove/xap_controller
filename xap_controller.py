@@ -22,10 +22,10 @@ through the G-Ware software.
 
 The system can assume that the channels are set up for stereo, so that there are 2 channels paired 
 together.  If stereo=1, the module will take each action twice, once on the listed source/zone 
-number and again on the source/zone + 1.
+number and again on the source/zone + 1. The default is stereo=0.
 
 For each source or zone, multiple channels can be listed, as a list.  If multiple channels are
-listed for a source and an output, they will be paired sequentially, source item 1 to zeone item 1, 
+listed for a source and an output, they will be paired sequentially, source item 1 to zone item 1, 
 source item 2 to zone item 2, etc.  If there are more source channels than zone channels, only the 
 first channels in the source will be used.  If there are more channels in a zone than in the source 
 being applied to it, the source channels will be repeated.  This multiple channel approach can be 
@@ -41,7 +41,6 @@ media_player:
    - platform: xap_controller
      path: /dev/ttyUSB-XAP800
      name: MyXAP
-     scan_interval: 30
      stereo: 1
      baud: 9600
      zones:
@@ -67,7 +66,6 @@ media_player:
    - platform: xap_controller
      path: /dev/ttyUSB-XAP800
      name: MyXAP
-     scan_interval: 30
      stereo: 0
      baud: 9600
      zones:
@@ -84,8 +82,8 @@ media_player:
          - "2:4"
          - "2:1"
          - "2:2"
-         # Family Room Surround zone has no center speaker, so list the two front 
-         # speakers again at the end and map the center channel to each of them
+         # Family Room Surround has no center channel, so list the two front 
+         # speakers at the end and map the center channel to each of them
 
      sources:
        'Home Audio':
@@ -104,15 +102,13 @@ media_player:
 
 zones: a list of output zone names, with a list one or more outputs for each zone. 
 sources: a list of source names, with a list of one or more sources per source name.
-   sources are listed as either a digit, indicating the input channel on unit 0, or else a string of the 
-format:  "<unit#>:<input#>:<bus letter>:<bus type>. Bus and Bus type are optional, but are neeed if 
-   using more than 1 unit and you want a source to be available on outputs in other units. 
+    sources are listed as either a digit, indicating the input channel on unit 0, or else a string of the 
+    format:  "<unit#>:<input#>:<bus letter>:<bus type>. Bus and Bus type are optional, but are neeed if using more than 1
+    unit and you want a source to be available on outputs in other units. 
 path: serial device path (can be a virtual serial port, using socat for example)
 name: the name of the platform instance
 stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the input (output) and input (output)+1
 baud: baud rate of serial port, default=38400
-scan_interval: how often to scan the unit for changes
-
 """
 
 import time
@@ -130,8 +126,8 @@ from homeassistant.const import (
 import homeassistant.helpers.config_validation as cv
 
 REQUIREMENTS = [
-    'https://github.com/jslove/XAPX00/archive/0.2.4.zip'
-    '#XAPX00==0.2.4']
+   'https://github.com/jslove/XAPX00/archive/0.2.5.zip'
+   '#XAPX00==0.2.5' ]
 
 testing = 0
 
@@ -192,9 +188,10 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     
 
     from XAPX00 import XAPX00
+    _LOGGER.debug('XAPX00 version: {}'.format(XAPX00.__version__))
     xapconn = XAPX00.XAPX00(path)
 
-    if config.get(CONF_STEREO, 1) == 0:
+    if config.get(CONF_STEREO, 0) == 0:
         xapconn.stereo = 0
     else:
         xapconn.stereo = 1
@@ -202,8 +199,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     xapconn.baud = config.get(CONF_BAUD, 38400)
 
     xapconn.convertDb = 1
-    xapconn.connect()
-    if not xapconn.connected:
+    if not xapconn.test_connection():
         _LOGGER.error('Not connected to %s', path)
         return
         
@@ -351,18 +347,11 @@ class XAPSource(MediaPlayerDevice):
 
     def turn_on(self):
         """Turn the media player on."""
-#        for s in self._inputs:
-#            if self._xapx00.getMute(s['CHAN'], unitCode = s['UNIT']) == 1:
-#                self._isMuted = self._xapx00.setMute(s['CHAN'], isMuted=0, unitCode = s['UNIT'])
         self.mute_volume(mute=0)
         self._state = STATE_ON
 
     def turn_off(self):
         """Turn off media player."""
-#        for s in self._inputs:
-#            if self._xapx00.getMute(s['CHAN'], unitCode=s['UNIT']) == 0:
-#                self._isMuted = self._xapx00.setMute(s['CHAN'], group="I",
-#                                                     isMuted=1, unitCode = s['UNIT'])
         self.mute_volume(mute=1)
         self._state = STATE_OFF
 
@@ -394,11 +383,11 @@ class XAPZone(MediaPlayerDevice):
         self._defaultMatrixLevel = 1
         self._isMuted = self.get_mute_status()
         self._active_source = SRC_OFF
-        self._poweroff_source = self._active_source
         self._active_source = self.get_source()
         self._poweroff_source = self._active_source
         # make sure sources synced across outputs
         self.select_source(self._active_source)
+        self.get_volume_level()
         self._sync_volume_level()
         self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
         _LOGGER.info("zone {} set up".format(self.__str__()))
@@ -424,29 +413,32 @@ class XAPZone(MediaPlayerDevice):
         return int(XUNIT), int(XOUT)
             
     def update(self):
-        self.get_mute_status()
-        self.get_volume_level()
-
+#        self.get_mute_status()
+#        self.get_volume_level()
+        pass  # can't be exchanged except by us, so can track state without calls
+    
     def select_source(self, source):
         """Set the input source"""
         actsrc = self._active_source  # a string
         _LOGGER.debug('select_source: source={}, actsrc = {}, self._sources={}'.format(
             source, actsrc, self._sources.keys()))
+        if source not in self._sources:
+            raise Exception("Requested source {} not in set up sources".format(source))
         cnt=0
         for xOut in self._outputs:
             XUNIT, XOUT = self.parse_output(xOut)
             if actsrc != SRC_OFF and actsrc != source:
                 XIN, XINGRP = self._sources[actsrc].getSource(XUNIT,cnt)
                 self._xapx00.setMatrixRouting(XIN, XOUT, 0, inGroup = XINGRP, unitCode = XUNIT) #turn current off
-            self._active_source = SRC_OFF
-            if source != SRC_OFF and source in self._sources:
+                _LOGGER.debug('Turned off actsrc: {}'.format(actsrc))
+            if source != SRC_OFF: #and source in self._sources:
                 XIN, XINGRP = self._sources[source].getSource(XUNIT, cnt)
-                ON=3 if (type(XIN) is int and XIN < 9) else 1  # if a mike input
+                ON = 3 if (type(XIN) is int and XIN < 9) else 1  # if a mike input
                 self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup = XINGRP, unitCode = XUNIT)
-                self._active_source = source
                 self._poweroff_source = source # in case turn_on called without calling turn_off
             cnt += 1
-
+        self._active_source = source
+ 
     def get_source(self):
         """Get first active source for outputs in this zone
            Since an input can be part of multiple sources, need to make this more sophisticated,
@@ -555,7 +547,6 @@ class XAPZone(MediaPlayerDevice):
     def turn_on(self):
         """Turn zone on"""
         _LOGGER.debug("turn_on {}".format(self))
-#        if self._state != STATE_ON:
         self.select_source(self._poweroff_source)
         self.mute_volume(0)
         self._state = STATE_ON
