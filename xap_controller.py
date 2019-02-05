@@ -1,4 +1,3 @@
-# pylint: disable = E0126
 """
 Support for interfacing with ClearOne XAP800 and XAP400 units via serial port.
 
@@ -126,8 +125,8 @@ from homeassistant.const import (
 import homeassistant.helpers.config_validation as cv
 
 REQUIREMENTS = [
-   'https://github.com/jslove/XAPX00/archive/0.2.5.zip'
-   '#XAPX00==0.2.5' ]
+   'https://github.com/jslove/XAPX00/archive/0.2.6.zip'
+   '#XAPX00==0.2.6' ]
 
 testing = 0
 
@@ -135,11 +134,12 @@ DOMAIN = 'xap_controller'
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_ZONES   = 'zones'
-CONF_SOURCES = 'sources'
-CONF_PATH    = 'path'
-CONF_STEREO  = 'stereo'
-CONF_BAUD    = 'baud'
+CONF_ZONES    = 'zones'
+CONF_SOURCES  = 'sources'
+CONF_PATH     = 'path'
+CONF_STEREO   = 'stereo'
+CONF_BAUD     = 'baud'
+CONF_TYPE     = 'XAPType'
 
 SRC_OFF = 'Off'
 
@@ -165,6 +165,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_ZONES): vol.Schema({cv.string:
                                           vol.All(cv.ensure_list, [vol.Any(int,str)])}),
     vol.Required(CONF_SOURCES): SOURCE_SCHEMA,
+    vol.Optional(CONF_TYPE, default="XAP800"): vol.In(["XAP800","XAP400"]),
 })
 # PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 #     vol.Required(CONF_PATH): cv.string,
@@ -189,7 +190,8 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
 
     from XAPX00 import XAPX00
     _LOGGER.debug('XAPX00 version: {}'.format(XAPX00.__version__))
-    xapconn = XAPX00.XAPX00(path)
+    _LOGGER.debug('XAP Type: {}'.format(config.get(CONF_TYPE)))
+    xapconn = XAPX00.XAPX00(path, XAPType=config.get(CONF_TYPE))
 
     if config.get(CONF_STEREO, 0) == 0:
         xapconn.stereo = 0
@@ -202,7 +204,6 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     if not xapconn.test_connection():
         _LOGGER.error('Not connected to %s', path)
         return
-        
 
     source_objs=[]
     zonesources = {}
