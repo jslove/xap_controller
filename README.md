@@ -95,4 +95,5 @@ media_player:
 * stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the input (output) and input (output)+1
 * baud: baud rate of serial port, default=38400, 9600, 19200, 57600
 * scan_interval: how often to scan the unit for changes (deprecated)
+* XAPType: XAP unit type, eithr XAP800 (default) or XAP400
 
