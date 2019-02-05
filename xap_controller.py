@@ -40,8 +40,9 @@ media_player:
    - platform: xap_controller
      path: /dev/ttyUSB-XAP800
      name: MyXAP
-     stereo: 1
-     baud: 9600
+     stereo: 1 #default is 0
+     baud: 38400 #default
+     XAPType: XAP800 #default is XAP800, can use XAP400
      zones:
        'Office':
          - 1
@@ -66,7 +67,7 @@ media_player:
      path: /dev/ttyUSB-XAP800
      name: MyXAP
      stereo: 0
-     baud: 9600
+     baud: 38400
      zones:
        'Office':
          - "1:1"
@@ -108,6 +109,7 @@ path: serial device path (can be a virtual serial port, using socat for example)
 name: the name of the platform instance
 stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the input (output) and input (output)+1
 baud: baud rate of serial port, default=38400
+XAPType: XAP unit type, eithr XAP800 (default) or XAP400
 """
 
 import time

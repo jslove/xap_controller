@@ -25,9 +25,9 @@ media_player:
    - platform: xap_controller
      path: /dev/ttyUSB-XAP800
      name: MyXAP
-     scan_interval: 30
-     stereo: 1
-     baud: 9600
+     stereo: 1 #see below for explanation
+     baud: 38400
+     XAPType: XAP800 #  XAP800 is default or XAP400
      zones:
        'Office':
          - 1
@@ -54,7 +54,7 @@ media_player:
      name: MyXAP
      scan_interval: 30
      stereo: 0
-     baud: 9600
+     baud: 38400
      zones:
        'Office':
          - "1:1"
@@ -93,6 +93,6 @@ media_player:
 * path: serial device path (can be a virtual serial port, using socat for example)
 * name: the name of the platform instance
 * stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the input (output) and input (output)+1
-* baud: baud rate of serial port, default=38400
-* scan_interval: how often to scan the unit for changes
+* baud: baud rate of serial port, default=38400, 9600, 19200, 57600
+* scan_interval: how often to scan the unit for changes (deprecated)
 
