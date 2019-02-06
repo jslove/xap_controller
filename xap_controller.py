@@ -109,7 +109,7 @@ path: serial device path (can be a virtual serial port, using socat for example)
 name: the name of the platform instance
 stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the input (output) and input (output)+1
 baud: baud rate of serial port, default=38400
-XAPType: XAP unit type, eithr XAP800 (default) or XAP400
+XAPType: XAP unit type, either XAP800 (default) or XAP400
 """
 
 import time
@@ -259,11 +259,7 @@ class XAPSource(MediaPlayerDevice):
     def parse_source(self, srcs):
         "Split into input unit, input #, expansion bus, expansion bus group"
         for src in srcs:
-            inpdict={'UNIT':None,'CHAN':None,'BUS':None, 'BUSGRP':'E', 'INPGRP':'I'} 
-            XBUS = None
-            XBUSGRP = None
-            XUNIT = 0
-            XCHAN = 0
+            inpdict={'UNIT':0,'CHAN':None,'BUS':None, 'BUSGRP':'E', 'INPGRP':'I'} 
             if type(src) is int:
                 inpdict['CHAN'] = src
             elif type(src) is str:
