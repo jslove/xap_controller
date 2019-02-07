@@ -432,7 +432,7 @@ class XAPZone(MediaPlayerDevice):
                 _LOGGER.debug('Turned off actsrc: {}'.format(actsrc))
             if source != SRC_OFF: #and source in self._sources:
                 XIN, XINGRP = self._sources[source].getSource(XUNIT, cnt)
-                ON = 3 if (type(XIN) is int and XIN <= (self.xapconn.matrixGeo-4)) else 1
+                ON = 3 if (type(XIN) is int and XIN <= (self._xapx00.matrixGeo-4)) else 1
                 # if a mike input on=3, if line on=1, last 4 inputs are line
                 self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup = XINGRP, unitCode = XUNIT)
                 self._poweroff_source = source # in case turn_on called without calling turn_off
