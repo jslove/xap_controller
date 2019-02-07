@@ -103,7 +103,7 @@ media_player:
 zones: a list of output zone names, with a list one or more outputs for each zone. 
 sources: a list of source names, with a list of one or more sources per source name.
     sources are listed as either a digit, indicating the input channel on unit 0, or else a string of the 
-    format:  "<unit#>:<input#>:<bus letter>:<bus type>. Bus and Bus type are optional, but are neeed if using more than 1
+    format:  "<unit#>:<input#>:<bus letter>:<bus type>. Bus and Bus type are optional, but are needed if using more than 1
     unit and you want a source to be available on outputs in other units. 
 path: serial device path (can be a virtual serial port, using socat for example)
 name: the name of the platform instance
@@ -127,8 +127,8 @@ from homeassistant.const import (
 import homeassistant.helpers.config_validation as cv
 
 REQUIREMENTS = [
-   'https://github.com/jslove/XAPX00/archive/0.2.6.zip'
-   '#XAPX00==0.2.6' ]
+   'https://github.com/jslove/XAPX00/archive/0.2.7.zip'
+   '#XAPX00==0.2.7' ]
 
 testing = 0
 
@@ -419,8 +419,8 @@ class XAPZone(MediaPlayerDevice):
     def select_source(self, source):
         """Set the input source"""
         actsrc = self._active_source  # a string
-        _LOGGER.debug('select_source: source={}, actsrc = {}, self._sources={}'.format(
-            source, actsrc, self._sources.keys()))
+        _LOGGER.debug('select_source for zone={}: source={}, actsrc={}, self._sources={}'.format(
+            self._name, source, actsrc, self._sources.keys()))
         if source not in self._sources:
             raise Exception("Requested source {} not in set up sources".format(source))
         cnt=0
@@ -432,7 +432,8 @@ class XAPZone(MediaPlayerDevice):
                 _LOGGER.debug('Turned off actsrc: {}'.format(actsrc))
             if source != SRC_OFF: #and source in self._sources:
                 XIN, XINGRP = self._sources[source].getSource(XUNIT, cnt)
-                ON = 3 if (type(XIN) is int and XIN < 9) else 1  # if a mike input
+                ON = 3 if (type(XIN) is int and XIN <= (self.xapconn.matrixGeo-4)) else 1
+                # if a mike input on=3, if line on=1, last 4 inputs are line
                 self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup = XINGRP, unitCode = XUNIT)
                 self._poweroff_source = source # in case turn_on called without calling turn_off
             cnt += 1
