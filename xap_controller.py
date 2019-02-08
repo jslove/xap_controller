@@ -127,8 +127,8 @@ from homeassistant.const import (
 import homeassistant.helpers.config_validation as cv
 
 REQUIREMENTS = [
-   'https://github.com/jslove/XAPX00/archive/0.2.7.zip'
-   '#XAPX00==0.2.7' ]
+   'https://github.com/jslove/XAPX00/archive/0.2.8.zip'
+   '#XAPX00==0.2.8' ]
 
 testing = 0
 
