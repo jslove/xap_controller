@@ -116,10 +116,13 @@ import time
 import logging
 import voluptuous as vol
 from string import ascii_uppercase
+
 from homeassistant.components.media_player import (
+     MediaPlayerDevice, PLATFORM_SCHEMA)
+
+from homeassistant.components.media_player.const import (
     SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
-    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MediaPlayerDevice,
-    PLATFORM_SCHEMA, MEDIA_TYPE_MUSIC)
+    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
 
 from homeassistant.const import (
     STATE_OFF, STATE_ON, CONF_NAME)
@@ -168,6 +171,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
                                           vol.All(cv.ensure_list, [vol.Any(int,str)])}),
     vol.Required(CONF_SOURCES): SOURCE_SCHEMA,
     vol.Optional(CONF_TYPE, default="XAP800"): vol.In(["XAP800","XAP400"]),
+    vol.Optional(CONF_NAME): cv.string,
+    vol.Optional(CONF_STEREO): cv.boolean,
 })
 # PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 #     vol.Required(CONF_PATH): cv.string,
