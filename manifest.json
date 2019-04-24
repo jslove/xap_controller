@@ -1,0 +1,10 @@
+{
+    "domain": "xap_controller",
+    "name": "XAP Contoller",
+    "documentation": "https://www.example.com",
+    "dependencies": [],
+    "codeowners": [],
+    "requirements": [
+      "https://github.com/jslove/XAPX00/archive/0.2.8.1.zip",
+      "#XAPX00==0.2.8.1" ]
+  }
