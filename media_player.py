@@ -173,14 +173,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_TYPE, default="XAP800"): vol.In(["XAP800","XAP400"]),
     vol.Optional(CONF_NAME): cv.string,
     vol.Optional(CONF_STEREO): cv.boolean,
+    vol.Optional(CONF_BAUD): int,
 })
-# PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-#     vol.Required(CONF_PATH): cv.string,
-#     vol.Required(CONF_ZONES): vol.Schema({cv.string:
-#                                           vol.All(cv.ensure_list, [int])}),
-#     vol.Required(CONF_SOURCES): SOURCE_SCHEMA,
-# })
-
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the XAPX00 platform."""
