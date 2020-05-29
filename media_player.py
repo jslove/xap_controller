@@ -120,7 +120,7 @@ import voluptuous as vol
 from string import ascii_uppercase
 
 from homeassistant.components.media_player import (
-     MediaPlayerDevice, PLATFORM_SCHEMA)
+     MediaPlayerEntity, PLATFORM_SCHEMA)
 
 from homeassistant.components.media_player.const import (
     SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
@@ -223,7 +223,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
             hass, xapconn, zonesources, zone_name, outputs)])
 
 
-class XAPSource(MediaPlayerDevice):
+class XAPSource(MediaPlayerEntity):
     """
     Represents one source
     """
@@ -365,7 +365,7 @@ class XAPSource(MediaPlayerDevice):
         return self._isMuted
 
 
-class XAPZone(MediaPlayerDevice):
+class XAPZone(MediaPlayerEntity):
     """
     Represents one or more XAP outputs, either mono or stereo
     """
