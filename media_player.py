@@ -260,9 +260,9 @@ class XAPSource(MediaPlayerEntity):
         "Split into input unit, input #, expansion bus, expansion bus group"
         for src in srcs:
             inpdict={'UNIT':0,'CHAN':None,'BUS':None, 'BUSGRP':'E', 'INPGRP':'I'} 
-            if type(src) is int:
+            if issubclass(type(src), int):
                 inpdict['CHAN'] = src
-            elif type(src) is str:
+            elif issubclass(type(src), str):
                 if ":" in src:
                     comps = src.count(':')
                     if comps == 1:
@@ -396,10 +396,10 @@ class XAPZone(MediaPlayerEntity):
         
     def parse_output(self, output):
         "Returns (unit,output) "
-        if type(output) is int:
+        if issubclass(type(output), int):
             XUNIT = 0
             XOUT = output
-        elif type(output) is str:
+        elif issubclass(type(output), str):
             if ":" in output:
                 XUNIT, XOUT =  output.split(":")
             elif output.isdigit():
@@ -432,7 +432,7 @@ class XAPZone(MediaPlayerEntity):
                 _LOGGER.debug('Turned off actsrc: {}'.format(actsrc))
             if source != SRC_OFF: #and source in self._sources:
                 XIN, XINGRP = self._sources[source].getSource(XUNIT, cnt)
-                ON = 3 if (type(XIN) is int and XIN <= (self._xapx00.matrixGeo-4)) else 1
+                ON = 3 if (issubclass(type(XIN), int) and XIN <= (self._xapx00.matrixGeo-4)) else 1
                 # if a mike input on=3, if line on=1, last 4 inputs are line
                 self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup = XINGRP, unitCode = XUNIT)
                 self._poweroff_source = source # in case turn_on called without calling turn_off
