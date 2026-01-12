@@ -122,9 +122,15 @@ from string import ascii_uppercase
 from homeassistant.components.media_player import (
      MediaPlayerEntity, PLATFORM_SCHEMA)
 
-from homeassistant.components.media_player.const import (
-    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
-    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
+import homeassistant.components.media_player as MP
+
+#from homeassistant.components.media_player.const import (
+#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
+#    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
+from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
+#(
+#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
+#    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
 
 from homeassistant.const import (
     STATE_OFF, STATE_ON, CONF_NAME)
@@ -151,12 +157,12 @@ CONF_TYPE     = 'XAPType'
 SRC_OFF = 'Off'
 
 SUPPORT_XAP_ZONE = \
-                   SUPPORT_VOLUME_MUTE | SUPPORT_VOLUME_SET | \
-                   SUPPORT_TURN_ON | SUPPORT_TURN_OFF | \
-                   SUPPORT_SELECT_SOURCE
+                   MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
+                   MPEF.TURN_ON | MPEF.TURN_OFF | \
+                   MPEF.SELECT_SOURCE
 
-SUPPORT_XAP_SOURCE = SUPPORT_VOLUME_MUTE | SUPPORT_VOLUME_SET | \
-                     SUPPORT_TURN_ON | SUPPORT_TURN_OFF
+SUPPORT_XAP_SOURCE = MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
+                     MPEF.TURN_ON | MPEF.TURN_OFF
 
 
 #OUTPUT_SCHEMA = vol.Schema({
@@ -483,7 +489,7 @@ class XAPZone(MediaPlayerEntity):
 
     @property
     def media_content_type(self):
-        return MEDIA_TYPE_MUSIC
+        return MP.MediaType.MUSIC
 
     @property
     def media_title(self):
