@@ -118,11 +118,17 @@ import voluptuous as vol
 from string import ascii_uppercase
 
 from homeassistant.components.media_player import (
-     MediaPlayerDevice, PLATFORM_SCHEMA)
+     MediaPlayerEntity, PLATFORM_SCHEMA)
 
-from homeassistant.components.media_player.const import (
-    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
-    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
+import homeassistant.components.media_player as MP
+
+#from homeassistant.components.media_player.const import (
+#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
+#    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
+from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
+#(
+#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
+#    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
 
 from homeassistant.const import (
     STATE_OFF, STATE_ON, CONF_NAME)
@@ -130,8 +136,11 @@ from homeassistant.const import (
 import homeassistant.helpers.config_validation as cv
 
 REQUIREMENTS = [
-   'https://github.com/jslove/XAPX00/archive/0.2.8.1.zip'
-   '#XAPX00==0.2.8.1' ]
+   'https://github.com/jslove/XAPX00/archive/0.2.8.2.zip',
+   '#XAPX00==0.2.8.2' ]
+#'XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2',
+#  "requirements": ["XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2"]
+
 
 testing = 0
 
@@ -149,30 +158,31 @@ CONF_TYPE     = 'XAPType'
 SRC_OFF = 'Off'
 
 SUPPORT_XAP_ZONE = \
-                   SUPPORT_VOLUME_MUTE | SUPPORT_VOLUME_SET | \
-                   SUPPORT_TURN_ON | SUPPORT_TURN_OFF | \
-                   SUPPORT_SELECT_SOURCE
+                   MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
+                   MPEF.TURN_ON | MPEF.TURN_OFF | \
+                   MPEF.SELECT_SOURCE
 
-SUPPORT_XAP_SOURCE = SUPPORT_VOLUME_MUTE | SUPPORT_VOLUME_SET | \
-                     SUPPORT_TURN_ON | SUPPORT_TURN_OFF
+SUPPORT_XAP_SOURCE = MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
+                     MPEF.TURN_ON | MPEF.TURN_OFF
 
-
-OUTPUT_SCHEMA = vol.Schema({
-    vol.Required(CONF_NAME): cv.string,
-})
 
 SOURCE_SCHEMA = vol.Schema({
     cv.string: cv.ensure_list(vol.Any(int,str,list)),
+})
+
+ZONE_SOURCE_SCHEMA = vol.Schema({
+    cv.string: vol.All(cv.ensure_list, [vol.Any(int,str)])
 })
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_PATH): cv.string,
     vol.Required(CONF_ZONES): vol.Schema({cv.string:
                                           vol.All(cv.ensure_list, [vol.Any(int,str)])}),
-    vol.Required(CONF_SOURCES): SOURCE_SCHEMA,
+    vol.Required(CONF_SOURCES): ZONE_SOURCE_SCHEMA,
     vol.Optional(CONF_TYPE, default="XAP800"): vol.In(["XAP800","XAP400"]),
     vol.Optional(CONF_NAME): cv.string,
     vol.Optional(CONF_STEREO): cv.boolean,
+    vol.Optional(CONF_BAUD): int,
 })
 # PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 #     vol.Required(CONF_PATH): cv.string,
@@ -228,7 +238,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
             hass, xapconn, zonesources, zone_name, outputs)])
 
 
-class XAPSource(MediaPlayerDevice):
+class XAPSource(MediaPlayerEntity):
     """
     Represents one source
     """
@@ -265,9 +275,9 @@ class XAPSource(MediaPlayerDevice):
         "Split into input unit, input #, expansion bus, expansion bus group"
         for src in srcs:
             inpdict={'UNIT':0,'CHAN':None,'BUS':None, 'BUSGRP':'E', 'INPGRP':'I'} 
-            if type(src) is int:
+            if issubclass(type(src), int):
                 inpdict['CHAN'] = src
-            elif type(src) is str:
+            elif issubclass(type(src), str):
                 if ":" in src:
                     comps = src.count(':')
                     if comps == 1:
@@ -370,7 +380,7 @@ class XAPSource(MediaPlayerDevice):
         return self._isMuted
 
 
-class XAPZone(MediaPlayerDevice):
+class XAPZone(MediaPlayerEntity):
     """
     Represents one or more XAP outputs, either mono or stereo
     """
@@ -401,10 +411,10 @@ class XAPZone(MediaPlayerDevice):
         
     def parse_output(self, output):
         "Returns (unit,output) "
-        if type(output) is int:
+        if issubclass(type(output), int):
             XUNIT = 0
             XOUT = output
-        elif type(output) is str:
+        elif issubclass(type(output), str):
             if ":" in output:
                 XUNIT, XOUT =  output.split(":")
             elif output.isdigit():
@@ -437,7 +447,7 @@ class XAPZone(MediaPlayerDevice):
                 _LOGGER.debug('Turned off actsrc: {}'.format(actsrc))
             if source != SRC_OFF: #and source in self._sources:
                 XIN, XINGRP = self._sources[source].getSource(XUNIT, cnt)
-                ON = 3 if (type(XIN) is int and XIN <= (self._xapx00.matrixGeo-4)) else 1
+                ON = 3 if (issubclass(type(XIN), int) and XIN <= (self._xapx00.matrixGeo-4)) else 1
                 # if a mike input on=3, if line on=1, last 4 inputs are line
                 self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup = XINGRP, unitCode = XUNIT)
                 self._poweroff_source = source # in case turn_on called without calling turn_off
@@ -488,7 +498,7 @@ class XAPZone(MediaPlayerDevice):
 
     @property
     def media_content_type(self):
-        return MEDIA_TYPE_MUSIC
+        return MP.MediaType.MUSIC
 
     @property
     def media_title(self):
