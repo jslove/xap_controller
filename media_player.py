@@ -135,9 +135,9 @@ from homeassistant.const import (
 
 import homeassistant.helpers.config_validation as cv
 
-REQUIREMENTS = [
-   'https://github.com/jslove/XAPX00/archive/0.2.8.2.zip',
-   '#XAPX00==0.2.8.2' ]
+#REQUIREMENTS = [
+#   'https://github.com/jslove/XAPX00/archive/0.2.8.2.zip',
+#   '#XAPX00==0.2.8.2' ]
 #'XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2',
 #  "requirements": ["XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2"]
 
