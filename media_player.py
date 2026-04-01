@@ -380,8 +380,8 @@ class XAPZone(MediaPlayerEntity):
         self._name = zone_name
         self._xapx00 = xapconn
         self._unitCode = unitCode
-        self._sources = sources #dict of source name:source obj
-        self._outputs = outputs
+        self._sources = sources.copy() #dict of source name:source obj
+        self._outputs = outputs.copy()
         # outputs is a list of outputs, each element can be a single int or
         # a string of "int:int" (unit:output)
         self._volume = 0
