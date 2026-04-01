@@ -6,5 +6,5 @@
     "codeowners": ["jslove"],
     "version": "2018.02.23",
     "requirements": [
-      "XAPX00@git+https://github.com/jslove/XAPX00.git@v0.2.8.2" ]
+      "XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2" ]
   }
