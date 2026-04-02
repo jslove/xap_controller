@@ -227,7 +227,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
 
     xapconn.convertDb = 1
     if not xapconn.test_connection():
-        _LOGGER.error('Not connected to %s', path)
+        _LOGGER.warning('Not connected to %s', path)
         return
 
     source_objs=[]
@@ -265,12 +265,12 @@ class XAPSource(MediaPlayerEntity):
         self._inputs = []
         self.parse_source(source_inputs)
         self.numChannels = len(self._inputs)
-        self._volume = self.get_volume_level()
-        self.set_volume_level(self._volume) # make sure synced
-        self.get_mute_status()
-        if self._isMuted:
-            self._state = STATE_OFF
-        self.mute_volume(self._isMuted) # sync
+        self._firstconnect = 0
+        self.connectionLive: bool = xapconn.test_connection()
+        if self.connectionLive:
+            self.firstConnect()
+        else:
+            self.startOffline()
         self._attr_unique_id = "-".join(["XAP-Source",self._name,self._xapx00.comPort, hashlib.sha256(json.dumps(source_inputs).encode()).hexdigest()])
         _LOGGER.info("source {} set up".format(self.__str__()))
 
@@ -279,6 +279,21 @@ class XAPSource(MediaPlayerEntity):
 
     def __repr__(self):
         return "{} ({})".format(self._name, self._inputs)
+
+    def firstConnect(self):
+        if self._firstconnect: return
+        self._volume = self.get_volume_level()
+        self.set_volume_level(self._volume) # make sure synced
+        self.get_mute_status()
+        if self._isMuted:
+            self._state = STATE_OFF
+        self.mute_volume(self._isMuted) # sync
+        self._firstconnect = 1
+
+    def startOffline(self):
+        self._volume = 0
+        self._isMuted = 1
+        self._state = STATE_OFF
 
     def parse_source(self, srcs):
         "Split into input unit, input #, expansion bus, expansion bus group"
@@ -370,21 +385,31 @@ class XAPSource(MediaPlayerEntity):
 
     def turn_on(self):
         """Turn the media player on."""
+        if not self.connectionLive:
+            self.connectionLive = self._xapx00.test_connection()
+            if self.connectionLive:
+                self.firstConnect()
+            else:
+                self._state = STATE_OFF
+                return
         self.mute_volume(mute=0)
         self._state = STATE_ON
 
     def turn_off(self):
         """Turn off media player."""
+        if not self.connectionLive: return
         self.mute_volume(mute=1)
         self._state = STATE_OFF
 
     def mute_volume(self, mute=2):
         """Toggle mute"""
+        if not self.connectionLive: return
         self._isMuted = self._xapx00.setMute(self._inputs[0]['CHAN'], group="I", isMuted=int(mute), unitCode = self._inputs[0]['UNIT'])
         for s in self._inputs[1:]:
             self._isMuted = self._xapx00.setMute(s['CHAN'], group="I", isMuted=self._isMuted, unitCode = s['UNIT'])            
 
     def get_mute_status(self):
+        if not self.connectionLive: return 1
         self._isMuted = self._xapx00.getMute(self._inputs[0]['CHAN'], group="I", unitCode = self._inputs[0]['UNIT'])
         return self._isMuted
 
@@ -404,8 +429,22 @@ class XAPZone(MediaPlayerEntity):
         # a string of "int:int" (unit:output)
         self._volume = 0
         self._defaultMatrixLevel = 1
-        self._isMuted = self.get_mute_status()
         self._active_source = SRC_OFF
+        self._firstconnect=0
+        self.connectionLive: bool = xapconn.test_connection()
+        if self.connectionLive:
+            self.firstConnect()
+        else:
+            self.startOffline()
+        self._attr_unique_id = "-".join(["XAP-Zone",self._name,self._xapx00.comPort, hashlib.sha256(json.dumps(self._outputs).encode()).hexdigest()])
+        _LOGGER.info("zone {} set up".format(self.__str__()))
+
+    def __str__(self):
+        return self._name
+
+    def firstConnect(self):
+        if self._firstconnect: return
+        self._isMuted = self.get_mute_status()
         self._active_source = self.get_source()
         self._poweroff_source = self._active_source
         # make sure sources synced across outputs
@@ -413,12 +452,17 @@ class XAPZone(MediaPlayerEntity):
         self.get_volume_level()
         self._sync_volume_level()
         self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
-        self._attr_unique_id = "-".join(["XAP-Zone",self._name,self._xapx00.comPort, hashlib.sha256(json.dumps(self._outputs).encode()).hexdigest()])
-        _LOGGER.info("zone {} set up".format(self.__str__()))
+        self._firstconnect = 1
 
-    def __str__(self):
-        return self._name
-        
+    def startOffline(self):
+        self._isMuted = 1
+        self._active_source = SRC_OFF
+        self._poweroff_source = self._active_source
+        # make sure sources synced across outputs
+        self.select_source(self._active_source)
+        self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
+
+
     def parse_output(self, output):
         "Returns (unit,output) "
         if issubclass(type(output), int):
@@ -443,6 +487,7 @@ class XAPZone(MediaPlayerEntity):
     
     def select_source(self, source):
         """Set the input source"""
+        if not self.connectionLive: return
         actsrc = self._active_source  # a string
         _LOGGER.debug('select_source for zone={}: source={}, actsrc={}, self._sources={}'.format(
             self._name, source, actsrc, self._sources.keys()))
@@ -469,6 +514,7 @@ class XAPZone(MediaPlayerEntity):
            Since an input can be part of multiple sources, need to make this more sophisticated,
            need to for all channels being on.
         """
+        if not self.connectionLive: return SRC_OFF
         _LOGGER.debug("In get_source for {}".format(self))
         _LOGGER.debug("  Checking: {}".format(self._sources))
         for xIn in self._sources.values():
@@ -522,6 +568,7 @@ class XAPZone(MediaPlayerEntity):
 
     def setDefaultLevel(self):
         """  set all crosspoint levels to default """
+        if not self.connectionLive: return
         cnt = 0
         for xOut in self._outputs:
             XUNIT, XOUT = self.parse_output(xOut)
@@ -546,6 +593,7 @@ class XAPZone(MediaPlayerEntity):
     def _sync_volume_level(self):
         """set all level of all outputs in zone to the same
         level as the first one in zone"""
+        if not self.connectionLive: return
         if self._active_source != SRC_OFF:
             XUNIT, XOUT = self.parse_output(self._outputs[0])
             volume = self._xapx00.getPropGain(XOUT, group="O",
@@ -554,6 +602,7 @@ class XAPZone(MediaPlayerEntity):
 
     def set_volume_level(self, volume):
         """Set volume level, range 0..1."""
+        if not self.connectionLive: return
         _LOGGER.debug("set_volume_level: {}:{}".format(self, volume))
         for output in self._outputs:
             XUNIT, XOUT = self.parse_output(output)
@@ -564,6 +613,7 @@ class XAPZone(MediaPlayerEntity):
 
     def get_volume_level(self):
         """Volume level of the media player (0..1)."""
+        if not self.connectionLive: return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
         gain = self._xapx00.getPropGain(XOUT, group="O", unitCode = XUNIT)
         self._volume = gain
@@ -572,8 +622,14 @@ class XAPZone(MediaPlayerEntity):
     def turn_on(self):
         """Turn zone on"""
         _LOGGER.debug("turn_on {}".format(self))
-        self.select_source(self._poweroff_source)
-        self.mute_volume(0)
+        if not self.connectionLive:
+            self.connectionLive = self._xapx00.test_connection()
+            if self.connectionLive:
+                self.firstConnect()
+            else:
+                self._state = STATE_OFF
+                return
+        self.mute_volume(mute=0)
         self._state = STATE_ON
 
     def turn_off(self):
@@ -586,6 +642,7 @@ class XAPZone(MediaPlayerEntity):
 
     def mute_volume(self, mute=2):
         """Send mute command, mute is bool from hass, default is 2 (toggle)"""
+        if not self.connectionLive: return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
         muted = self._xapx00.setMute(XOUT, group="O", isMuted=int(mute),
                                      unitCode = XUNIT)
@@ -596,8 +653,9 @@ class XAPZone(MediaPlayerEntity):
         self._isMuted = bool(muted)
 
     def get_mute_status(self):
-        XUNIT, XOUT = self.parse_output(self._outputs[0])
-        self._isMuted = bool(self._xapx00.getMute(XOUT, group="O", unitCode=XUNIT))
+        if self.connectionLive:
+            XUNIT, XOUT = self.parse_output(self._outputs[0])
+            self._isMuted = bool(self._xapx00.getMute(XOUT, group="O", unitCode=XUNIT))
         return self._isMuted
 
     @property
