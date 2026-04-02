@@ -118,6 +118,7 @@ import time
 import logging
 import voluptuous as vol
 from string import ascii_uppercase
+import json, hashlib
 
 from homeassistant.components.media_player import (
      MediaPlayerEntity, PLATFORM_SCHEMA)
@@ -188,11 +189,10 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     path = config.get(CONF_PATH)
 
     if path is None:
-        _LOGGER.error("Invalid config. Expected %s",
-                      CONF_PATH)
+        _LOGGER.error("Invalid config. Expected %s", CONF_PATH)
         return False
 
-    sources = config[CONF_SOURCES]
+    sources = config[CONF_SOURCES].copy()
     _LOGGER.debug("Conf file sources: {}".format(sources))
     
 
@@ -254,6 +254,7 @@ class XAPSource(MediaPlayerEntity):
         if self._isMuted:
             self._state = STATE_OFF
         self.mute_volume(self._isMuted) # sync
+        self._attr_unique_id = "-".join(["XAP-Source",self._name,self._xapx00.comPort, hashlib.sha256(json.dumps(source_inputs).encode()).hexdigest()])
         _LOGGER.info("source {} set up".format(self.__str__()))
 
     def __str__(self):
@@ -395,6 +396,7 @@ class XAPZone(MediaPlayerEntity):
         self.get_volume_level()
         self._sync_volume_level()
         self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
+        self._attr_unique_id = "-".join(["XAP-Zone",self._name,self._xapx00.comPort, hashlib.sha256(json.dumps(self._outputs).encode()).hexdigest()])
         _LOGGER.info("zone {} set up".format(self.__str__()))
 
     def __str__(self):
@@ -584,7 +586,8 @@ class XAPZone(MediaPlayerEntity):
     @property
     def source_list(self):
         """List of available input sources."""
-        return list(self._sources.keys())
+#        return list(self._sources.keys())
+        return sorted(self._sources)
 
     @property
     def source(self):
