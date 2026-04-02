@@ -119,15 +119,23 @@ import logging
 import voluptuous as vol
 from string import ascii_uppercase
 import json, hashlib
+import json, hashlib
 
 from homeassistant.components.media_player import (
+     MediaPlayerEntity, PLATFORM_SCHEMA)
      MediaPlayerEntity, PLATFORM_SCHEMA)
 
 import homeassistant.components.media_player as MP
 
+#import homeassistant.components.media_player as MP
+
 #from homeassistant.components.media_player.const import (
-#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
+##    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
 #    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
+from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
+#(
+#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
+##    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
 #(
 #    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
@@ -139,8 +147,11 @@ from homeassistant.const import (
 import homeassistant.helpers.config_validation as cv
 
 #REQUIREMENTS = [
-#   'https://github.com/jslove/XAPX00/archive/0.2.8.2.zip'
+#   'https://github.com/jslove/XAPX00/archive/0.2.8.2.zip',
 #   '#XAPX00==0.2.8.2' ]
+#'XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2',
+#  "requirements": ["XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2"]
+
 
 testing = 0
 
@@ -161,14 +172,19 @@ SUPPORT_XAP_ZONE = \
                    MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
                    MPEF.TURN_ON | MPEF.TURN_OFF | \
                    MPEF.SELECT_SOURCE
+                   MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
+                   MPEF.TURN_ON | MPEF.TURN_OFF | \
+                   MPEF.SELECT_SOURCE
 
+SUPPORT_XAP_SOURCE = MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
+                     MPEF.TURN_ON | MPEF.TURN_OFF
 SUPPORT_XAP_SOURCE = MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
                      MPEF.TURN_ON | MPEF.TURN_OFF
 
 
-#OUTPUT_SCHEMA = vol.Schema({
-#    vol.Required(CONF_NAME): cv.string,
-#})
+ZONE_SOURCE_SCHEMA = vol.Schema({
+    cv.string: vol.All(cv.ensure_list, [vol.Any(int,str)])
+})
 
 ZONE_SOURCE_SCHEMA = vol.Schema({
     cv.string: vol.All(cv.ensure_list, [vol.Any(int,str)])
@@ -176,13 +192,21 @@ ZONE_SOURCE_SCHEMA = vol.Schema({
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_PATH): cv.string,
-    vol.Required(CONF_ZONES): ZONE_SOURCE_SCHEMA,
+    vol.Required(CONF_ZONES): vol.Schema({cv.string:
+                                          vol.All(cv.ensure_list, [vol.Any(int,str)])}),
     vol.Required(CONF_SOURCES): ZONE_SOURCE_SCHEMA,
     vol.Optional(CONF_TYPE, default="XAP800"): vol.In(["XAP800","XAP400"]),
     vol.Optional(CONF_NAME): cv.string,
     vol.Optional(CONF_STEREO): cv.boolean,
     vol.Optional(CONF_BAUD): int,
 })
+# PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
+#     vol.Required(CONF_PATH): cv.string,
+#     vol.Required(CONF_ZONES): vol.Schema({cv.string:
+#                                           vol.All(cv.ensure_list, [int])}),
+#     vol.Required(CONF_SOURCES): SOURCE_SCHEMA,
+# })
+
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the XAPX00 platform."""
