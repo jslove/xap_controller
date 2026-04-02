@@ -123,7 +123,6 @@ import json, hashlib
 
 from homeassistant.components.media_player import (
      MediaPlayerEntity, PLATFORM_SCHEMA)
-     MediaPlayerEntity, PLATFORM_SCHEMA)
 
 import homeassistant.components.media_player as MP
 
@@ -172,15 +171,9 @@ SUPPORT_XAP_ZONE = \
                    MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
                    MPEF.TURN_ON | MPEF.TURN_OFF | \
                    MPEF.SELECT_SOURCE
-                   MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
-                   MPEF.TURN_ON | MPEF.TURN_OFF | \
-                   MPEF.SELECT_SOURCE
 
 SUPPORT_XAP_SOURCE = MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
                      MPEF.TURN_ON | MPEF.TURN_OFF
-SUPPORT_XAP_SOURCE = MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
-                     MPEF.TURN_ON | MPEF.TURN_OFF
-
 
 ZONE_SOURCE_SCHEMA = vol.Schema({
     cv.string: vol.All(cv.ensure_list, [vol.Any(int,str)])

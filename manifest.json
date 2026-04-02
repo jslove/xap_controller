@@ -4,7 +4,7 @@
     "documentation": "https://github.com/jslove/xap_controller/blob/master/README.md",
     "dependencies": [],
     "codeowners": ["jslove"],
-    "version": "2018.02.23",
+    "version": "2026.04.02",
     "requirements": [
       "XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2" ]
   }
