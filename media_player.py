@@ -125,32 +125,11 @@ from homeassistant.components.media_player import (
      MediaPlayerEntity, PLATFORM_SCHEMA)
 
 import homeassistant.components.media_player as MP
-
-#import homeassistant.components.media_player as MP
-
-#from homeassistant.components.media_player.const import (
-##    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
-#    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
-#(
-#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
-##    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
-from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
-#(
-#    SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE,
-#    SUPPORT_VOLUME_SET, SUPPORT_SELECT_SOURCE, MEDIA_TYPE_MUSIC)
-
 from homeassistant.const import (
     STATE_OFF, STATE_ON, CONF_NAME)
 
 import homeassistant.helpers.config_validation as cv
-
-#REQUIREMENTS = [
-#   'https://github.com/jslove/XAPX00/archive/0.2.8.2.zip',
-#   '#XAPX00==0.2.8.2' ]
-#'XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2',
-#  "requirements": ["XAPX00@git+https://github.com/jslove/XAPX00.git@0.2.8.2"]
-
 
 testing = 0
 
@@ -179,10 +158,6 @@ ZONE_SOURCE_SCHEMA = vol.Schema({
     cv.string: vol.All(cv.ensure_list, [vol.Any(int,str)])
 })
 
-ZONE_SOURCE_SCHEMA = vol.Schema({
-    cv.string: vol.All(cv.ensure_list, [vol.Any(int,str)])
-})
-
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_PATH): cv.string,
     vol.Required(CONF_ZONES): vol.Schema({cv.string:
@@ -193,12 +168,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_STEREO): cv.boolean,
     vol.Optional(CONF_BAUD): int,
 })
-# PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-#     vol.Required(CONF_PATH): cv.string,
-#     vol.Required(CONF_ZONES): vol.Schema({cv.string:
-#                                           vol.All(cv.ensure_list, [int])}),
-#     vol.Required(CONF_SOURCES): SOURCE_SCHEMA,
-# })
 
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
@@ -212,7 +181,6 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     sources = config[CONF_SOURCES].copy()
     _LOGGER.debug("Conf file sources: {}".format(sources))
     
-
     from XAPX00 import XAPX00
     _LOGGER.debug('XAPX00 version: {}'.format(XAPX00.__version__))
     _LOGGER.debug('XAP Type: {}'.format(config.get(CONF_TYPE)))
@@ -228,7 +196,6 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     xapconn.convertDb = 1
     if not xapconn.test_connection():
         _LOGGER.warning('Not connected to %s', path)
-        return
 
     source_objs=[]
     zonesources = {}
