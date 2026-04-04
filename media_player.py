@@ -119,7 +119,6 @@ import logging
 import voluptuous as vol
 from string import ascii_uppercase
 import json, hashlib
-import json, hashlib
 
 from homeassistant.components.media_player import (
      MediaPlayerEntity, PLATFORM_SCHEMA)
@@ -208,7 +207,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     else:
         xapconn.stereo = 1
 
-    xapconn.baud = config.get(CONF_BAUD, 38400)
+    xapconn.baudRate = config.get(CONF_BAUD, 38400)
 
     xapconn.convertDb = 1
     # Entities can use xapconn.connectionLive to test connection state
@@ -616,7 +615,7 @@ class XAPZone(MediaPlayerEntity):
     def turn_on(self):
         """Turn zone on"""
         _LOGGER.debug("turn_on {}".format(self))
-        if not self.connectionLive:
+        if not self.connectionLive():
             live = self._xapx00.test_connection()
             if live:
                 self.firstConnect()
