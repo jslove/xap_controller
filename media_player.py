@@ -114,61 +114,38 @@ media_player:
 
 """
 
-import time
 import logging
 import functools
-import voluptuous as vol
-import json, hashlib
+import json
+import hashlib
 
-from homeassistant.components.media_player import (
-     MediaPlayerEntity, PLATFORM_SCHEMA)
-
+from homeassistant.components.media_player import MediaPlayerEntity
 import homeassistant.components.media_player as MP
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
-from homeassistant.const import (
-    STATE_OFF, STATE_ON, CONF_NAME)
-
-import homeassistant.helpers.config_validation as cv
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from XAPX00 import XAPX00, XAPCommError, XAPRespError
 
-testing = 0
+from .config_flow import (
+    CONF_PATH, CONF_SOURCES, CONF_ZONES, CONF_TYPE, CONF_STEREO, CONF_BAUD,
+)
 
 DOMAIN = 'xap_controller'
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_ZONES    = 'zones'
-CONF_SOURCES  = 'sources'
-CONF_PATH     = 'path'
-CONF_STEREO   = 'stereo'
-CONF_BAUD     = 'baud'
-CONF_TYPE     = 'XAPType'
-
 SRC_OFF = 'Off'
 
-SUPPORT_XAP_ZONE = \
-                   MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
-                   MPEF.TURN_ON | MPEF.TURN_OFF | \
-                   MPEF.SELECT_SOURCE
+SUPPORT_XAP_ZONE = (
+    MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
+    MPEF.TURN_ON | MPEF.TURN_OFF |
+    MPEF.SELECT_SOURCE
+)
 
-SUPPORT_XAP_SOURCE = MPEF.VOLUME_MUTE | MPEF.VOLUME_SET | \
-                     MPEF.TURN_ON | MPEF.TURN_OFF
-
-ZONE_SOURCE_SCHEMA = vol.Schema({
-    cv.string: vol.All(cv.ensure_list, [vol.Any(int,str)])
-})
-
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_PATH): cv.string,
-    vol.Required(CONF_ZONES): vol.Schema({cv.string:
-                                          vol.All(cv.ensure_list, [vol.Any(int,str)])}),
-    vol.Required(CONF_SOURCES): ZONE_SOURCE_SCHEMA,
-    vol.Optional(CONF_TYPE, default="XAP800"): vol.In(["XAP800","XAP400"]),
-    vol.Optional(CONF_NAME): cv.string,
-    vol.Optional(CONF_STEREO): cv.boolean,
-    vol.Optional(CONF_BAUD): int,
-})
+SUPPORT_XAP_SOURCE = (
+    MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
+    MPEF.TURN_ON | MPEF.TURN_OFF
+)
 
 
 def handle_xap_exceptions(func):
@@ -187,29 +164,21 @@ def handle_xap_exceptions(func):
     return wrapper
 
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Setup the XAPX00 platform."""
-    path = config.get(CONF_PATH)
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up XAP Controller media player entities from a config entry."""
+    path    = entry.data[CONF_PATH]
+    sources = json.loads(entry.data[CONF_SOURCES])
+    zones   = json.loads(entry.data[CONF_ZONES])
 
-    if path is None:
-        _LOGGER.error("Invalid config. Expected %s", CONF_PATH)
-        return False
-
-    sources = config[CONF_SOURCES].copy()
     _LOGGER.debug("Conf file sources: {}".format(sources))
-
     _LOGGER.debug('XAPX00 version: {}'.format(XAPX00.__version__))
-    _LOGGER.debug('XAP Type: {}'.format(config.get(CONF_TYPE)))
-    xapconn = XAPX00.XAPX00(path, XAPType=config.get(CONF_TYPE))
+    _LOGGER.debug('XAP Type: {}'.format(entry.data.get(CONF_TYPE)))
 
-    if config.get(CONF_STEREO, 0) == 0:
-        xapconn.stereo = 0
-    else:
-        xapconn.stereo = 1
-
-    xapconn.baudRate = config.get(CONF_BAUD, 38400)
-
+    xapconn = XAPX00.XAPX00(path, XAPType=entry.data.get(CONF_TYPE, "XAP800"))
+    xapconn.stereo    = 1 if entry.data.get(CONF_STEREO, False) else 0
+    xapconn.baudRate  = entry.data.get(CONF_BAUD, 38400)
     xapconn.convertDb = 1
+
     # Entities can use xapconn.connectionLive to test connection state
     connected = await hass.async_add_executor_job(xapconn.test_connection)
     if not connected:
@@ -225,7 +194,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     zonesources[SRC_OFF] = 0
 
     zone_objs = []
-    for zone_name, outputs in config[CONF_ZONES].items():
+    for zone_name, outputs in zones.items():
         zone_objs.append(XAPZone(hass, xapconn, zonesources, zone_name, outputs))
 
     async_add_entities(source_objs + zone_objs)
@@ -354,7 +323,7 @@ class XAPSource(MediaPlayerEntity):
 
     @handle_xap_exceptions
     async def _get_volume_level(self):
-        """Blocking XAP call — run in executor."""
+        """ Blocking XAP call — run in executor."""
         if not self.connectionLive():
             return self._volume
         vinp = self._inputs[0]
