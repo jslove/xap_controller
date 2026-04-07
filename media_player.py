@@ -197,9 +197,9 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
 
     sources = config[CONF_SOURCES].copy()
     _LOGGER.debug("Conf file sources: {}".format(sources))
-    _LOGGER.debug('XAPX00 version: {}'.format(XAPX00.__version__))
+#    _LOGGER.debug('XAPX00 version: {}'.format(XAPX00.__version__))
     _LOGGER.debug('XAP Type: {}'.format(config.get(CONF_TYPE)))
-    xapconn = XAPX00.XAPX00(path, XAPType=config.get(CONF_TYPE))
+    xapconn = XAPX00(path, XAPType=config.get(CONF_TYPE))
 
     if config.get(CONF_STEREO, 0) == 0:
         xapconn.stereo = 0
