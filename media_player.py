@@ -110,7 +110,7 @@ media_player:
 * name: the name of the platform instance
 * stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the input (output) and input+1 (output)+1
 * baud: baud rate of serial port, 38400 (default), 9600, 19200, 57600
-* XAPType: XAP unit type, eithr XAP800 (default) or XAP400
+* XAPType: XAP unit type, either XAP800 (default) or XAP400
 
 """
 
@@ -135,6 +135,7 @@ from XAPX00 import XAPX00, XAPCommError, XAPRespError
 testing = 0
 
 DOMAIN = 'xap_controller'
+
 
 _LOGGER = logging.getLogger(__name__)
 
