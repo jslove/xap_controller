@@ -136,6 +136,7 @@ testing = 0
 
 DOMAIN = 'xap_controller'
 
+__version__ = '2026.04.06'
 _LOGGER = logging.getLogger(__name__)
 
 CONF_ZONES    = 'zones'
