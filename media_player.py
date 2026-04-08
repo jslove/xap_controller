@@ -481,6 +481,7 @@ class XAPZone(MediaPlayerEntity):
     @handle_xap_exceptions
     def select_source(self, source):
         """Set the input source"""
+        if not self.connectionLive(): return
         actsrc = self._active_source  # a string
         _LOGGER.debug('select_source for zone={}: source={}, actsrc={}, self._sources={}'.format(
             self._name, source, actsrc, self._sources.keys()))
@@ -563,6 +564,7 @@ class XAPZone(MediaPlayerEntity):
     @handle_xap_exceptions
     def setDefaultLevel(self):
         """  set all crosspoint levels to default """
+        if not self.connectionLive(): return
         cnt = 0
         for xOut in self._outputs:
             XUNIT, XOUT = self.parse_output(xOut)
