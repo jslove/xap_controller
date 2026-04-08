@@ -114,11 +114,13 @@ media_player:
 
 """
 
-import time
 import logging
 import voluptuous as vol
 from string import ascii_uppercase
-import json, hashlib
+import json
+import hashlib
+import functools
+
 
 from homeassistant.components.media_player import (
      MediaPlayerEntity, PLATFORM_SCHEMA)
@@ -171,7 +173,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_BAUD): int,
 })
 
-import functools
 def handle_xap_exceptions(func):
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
