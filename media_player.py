@@ -378,11 +378,10 @@ class XAPSource(MediaPlayerEntity):
         """Turn the media player on."""
         if not self.connectionLive():
             live = self._xapx00.test_connection()
-            if live:
-                self.firstConnect()
-            else:
-                self._state = STATE_OFF
+            if not live:
                 return
+        if not self._firstConnect:
+            self.firstConnect()
         self.mute_volume(mute=0)
         self._state = STATE_ON
 
@@ -420,9 +419,8 @@ class XAPZone(MediaPlayerEntity):
         self._volume = 0
         self._defaultMatrixLevel = 1
         self._active_source = SRC_OFF
-        self._firstconnect=0
-        connected = xapconn.test_connection()
-        if connected:
+        self._firstconnect = 0
+        if xapconn.connectionLive:
             self.firstConnect()
         else:
             self.startOffline()
@@ -476,7 +474,7 @@ class XAPZone(MediaPlayerEntity):
     def update(self):
 #        self.get_mute_status()
 #        self.get_volume_level()
-        pass  # can't be exchanged except by us, so can track state without calls
+        pass  # can't be changed except by us, so can track state without calls
     
     @handle_xap_exceptions
     def select_source(self, source):
@@ -590,6 +588,7 @@ class XAPZone(MediaPlayerEntity):
     def _sync_volume_level(self):
         """set all level of all outputs in zone to the same
         level as the first one in zone"""
+        if not self.connectionLive(): return
         if self._active_source != SRC_OFF:
             XUNIT, XOUT = self.parse_output(self._outputs[0])
             volume = self._xapx00.getPropGain(XOUT, group="O",
@@ -600,6 +599,7 @@ class XAPZone(MediaPlayerEntity):
     def set_volume_level(self, volume):
         """Set volume level, range 0..1."""
         _LOGGER.debug("set_volume_level: {}:{}".format(self, volume))
+        if not self.connectionLive(): return
         for output in self._outputs:
             XUNIT, XOUT = self.parse_output(output)
             _LOGGER.debug("Set Volume for output {} to {}".format(output, volume))
@@ -610,6 +610,7 @@ class XAPZone(MediaPlayerEntity):
     @handle_xap_exceptions
     def get_volume_level(self):
         """Volume level of the media player (0..1)."""
+        if not self.connectionLive(): return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
         gain = self._xapx00.getPropGain(XOUT, group="O", unitCode = XUNIT)
         self._volume = gain
@@ -620,25 +621,29 @@ class XAPZone(MediaPlayerEntity):
         _LOGGER.debug("turn_on {}".format(self))
         if not self.connectionLive():
             live = self._xapx00.test_connection()
-            if live:
-                self.firstConnect()
-            else:
-                self._state = STATE_OFF
+            if not live: 
                 return
+        if not self._firstconnect:
+            self.firstConnect()
         self.mute_volume(mute=0)
         self._state = STATE_ON
 
     def turn_off(self):
         """Turn off zone"""
         _LOGGER.debug("turn_off {}".format(self))
-        self._state = STATE_OFF
+        if not self.connectionLive():
+            live = self._xapx00.test_connection()
+            if not live:
+                return
         self._poweroff_source = self._active_source
         self.select_source(SRC_OFF)
         self.mute_volume(1)
+        self._state = STATE_OFF
 
     @handle_xap_exceptions
     def mute_volume(self, mute=2):
         """Send mute command, mute is bool from hass, default is 2 (toggle)"""
+        if not self.connectionLive(): return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
         muted = self._xapx00.setMute(XOUT, group="O", isMuted=int(mute),
                                      unitCode = XUNIT)
@@ -650,6 +655,7 @@ class XAPZone(MediaPlayerEntity):
 
     @handle_xap_exceptions
     def get_mute_status(self):
+        if not self.connectionLive(): return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
         self._isMuted = bool(self._xapx00.getMute(XOUT, group="O", unitCode=XUNIT))
         return self._isMuted
