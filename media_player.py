@@ -132,7 +132,8 @@ from homeassistant.const import (
 
 import homeassistant.helpers.config_validation as cv
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from XAPX00 import XAPX00, XAPCommError, XAPRespError
+from XAPX00 import __version__, XAPX00, XAPCommError, XAPRespError
+XAPVER = __version__
 
 testing = 0
 
@@ -193,15 +194,18 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the XAPX00 platform."""
     path = config.get(CONF_PATH)
 
+    _LOGGER.debug("setup_platform started")
+
     if path is None:
         _LOGGER.error("Invalid config. Expected %s", CONF_PATH)
         return False
 
     sources = config[CONF_SOURCES].copy()
     _LOGGER.debug("Conf file sources: {}".format(sources))
-#    _LOGGER.debug('XAPX00 version: {}'.format(XAPX00.__version__))
+    _LOGGER.debug('xap_controller: XAPX00 version: {}'.format(XAPVER))
     _LOGGER.debug('XAP Type: {}'.format(config.get(CONF_TYPE)))
     xapconn = XAPX00(path, XAPType=config.get(CONF_TYPE))
+    _LOGGER.debug('xapconn created')
 
     if config.get(CONF_STEREO, 0) == 0:
         xapconn.stereo = 0
@@ -224,12 +228,14 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         add_devices([sourceobj])
         source_objs.append(sourceobj)
         zonesources[source_name] = sourceobj
+    _LOGGER.debug('sources complete')
 
     zonesources[SRC_OFF] = 0
 
     for zone_name, outputs in config[CONF_ZONES].items():
         add_devices([XAPZone(
             hass, xapconn, zonesources, zone_name, outputs)])
+    _LOGGER.debug('zones complete')
 
 
 class XAPSource(MediaPlayerEntity):
@@ -251,7 +257,7 @@ class XAPSource(MediaPlayerEntity):
         self._inputs = []
         self.parse_source(source_inputs)
         self.numChannels = len(self._inputs)
-        self._firstconnect = 0
+        self._first_connect = 0
         if self.connectionLive():
             self.firstConnect()
         else:
@@ -269,19 +275,21 @@ class XAPSource(MediaPlayerEntity):
         return self._xapx00.connectionLive
 
     def firstConnect(self):
-        if self._firstconnect: return
+        if self._first_connect: return
         self._volume = self.get_volume_level()
         self.set_volume_level(self._volume) # make sure synced
         self.get_mute_status()
         if self._isMuted:
             self._state = STATE_OFF
         self.mute_volume(self._isMuted) # sync
-        self._firstconnect = 1
+        self._first_connect = 1
+        _LOGGER.debug('%s: firstConnect complete' % self._name)
 
     def startOffline(self):
         self._volume = 0
         self._isMuted = 1
         self._state = STATE_OFF
+        _LOGGER.debug('%s: startOffline complete' % self._name)
 
     def parse_source(self, srcs):
         "Split into input unit, input #, expansion bus, expansion bus group"
@@ -380,7 +388,7 @@ class XAPSource(MediaPlayerEntity):
             live = self._xapx00.test_connection()
             if not live:
                 return
-        if not self._firstConnect:
+        if not self._first_connect:
             self.firstConnect()
         self.mute_volume(mute=0)
         self._state = STATE_ON
@@ -419,7 +427,7 @@ class XAPZone(MediaPlayerEntity):
         self._volume = 0
         self._defaultMatrixLevel = 1
         self._active_source = SRC_OFF
-        self._firstconnect = 0
+        self._first_connect = 0
         if xapconn.connectionLive:
             self.firstConnect()
         else:
@@ -434,7 +442,7 @@ class XAPZone(MediaPlayerEntity):
         return self._xapx00.connectionLive
     
     def firstConnect(self):
-        if self._firstconnect: return
+        if self._first_connect: return
         self._isMuted = self.get_mute_status()
         self._active_source = self.get_source()
         self._poweroff_source = self._active_source
@@ -443,7 +451,8 @@ class XAPZone(MediaPlayerEntity):
         self.get_volume_level()
         self._sync_volume_level()
         self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
-        self._firstconnect = 1
+        self._first_connect = 1
+        _LOGGER.debug('%s: firstConnect complete' % self._name)
 
     def startOffline(self):
         self._isMuted = 1
@@ -452,6 +461,7 @@ class XAPZone(MediaPlayerEntity):
         # make sure sources synced across outputs
         self.select_source(self._active_source)
         self._state = STATE_ON if self._active_source != SRC_OFF else STATE_OFF
+        _LOGGER.debug('%s: startOffline complete' % self._name)
 
 
     def parse_output(self, output):
@@ -623,7 +633,7 @@ class XAPZone(MediaPlayerEntity):
             live = self._xapx00.test_connection()
             if not live: 
                 return
-        if not self._firstconnect:
+        if not self._first_connect:
             self.firstConnect()
         self.mute_volume(mute=0)
         self._state = STATE_ON
