@@ -176,24 +176,35 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     conn_type = entry.data.get(CONF_CONNECTION_TYPE, "serial")
     xap_type  = entry.data.get(CONF_TYPE, "XAP800")
+    stereo    = 1 if entry.data.get(CONF_STEREO, False) else 0
 
+    # XAPX00.__init__ calls test_connection() internally, which uses
+    # loop.run_until_complete() for telnet.  That must not run on HA's event
+    # loop, so construct the object inside an executor thread.
     if conn_type == "telnet":
-        xapconn = XAPX00(
-            connection_type="telnet",
-            telnet_host=entry.data[CONF_HOST],
-            telnet_port=entry.data.get(CONF_PORT, 23),
-            telnet_username=entry.data.get(CONF_TELNET_USERNAME, "clearone"),
-            telnet_password=entry.data.get(CONF_TELNET_PASSWORD, "converge"),
-            XAPType=xap_type,
-        )
         conn_label = entry.data[CONF_HOST]
+        def _make_conn():
+            conn = XAPX00(
+                connection_type="telnet",
+                telnet_host=entry.data[CONF_HOST],
+                telnet_port=entry.data.get(CONF_PORT, 23),
+                telnet_username=entry.data.get(CONF_TELNET_USERNAME, "clearone"),
+                telnet_password=entry.data.get(CONF_TELNET_PASSWORD, "converge"),
+                XAPType=xap_type,
+            )
+            conn.stereo    = stereo
+            conn.convertDb = 1
+            return conn
     else:
-        xapconn = XAPX00(entry.data[CONF_PATH], XAPType=xap_type)
-        xapconn.baudRate = entry.data.get(CONF_BAUD, 38400)
         conn_label = entry.data[CONF_PATH]
+        def _make_conn():
+            conn = XAPX00(entry.data[CONF_PATH], XAPType=xap_type)
+            conn.baudRate  = entry.data.get(CONF_BAUD, 38400)
+            conn.stereo    = stereo
+            conn.convertDb = 1
+            return conn
 
-    xapconn.stereo    = 1 if entry.data.get(CONF_STEREO, False) else 0
-    xapconn.convertDb = 1
+    xapconn = await hass.async_add_executor_job(_make_conn)
 
     # Entities can use xapconn.connectionLive to test connection state
     connected = await hass.async_add_executor_job(xapconn.test_connection)
