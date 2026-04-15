@@ -194,6 +194,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
             conn.stereo    = stereo
             conn.convertDb = 1
+            conn.conn_id   = entry.data[CONF_HOST]
             return conn
     else:
         conn_label = entry.data[CONF_PATH]
@@ -202,6 +203,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             conn.baudRate  = entry.data.get(CONF_BAUD, 38400)
             conn.stereo    = stereo
             conn.convertDb = 1
+            conn.conn_id   = entry.data[CONF_PATH]
             return conn
 
     xapconn = await hass.async_add_executor_job(_make_conn)
@@ -250,7 +252,7 @@ class XAPSource(MediaPlayerEntity):
         self._volume = 0
         self._isMuted = 1
         self._first_connect = 0
-        self._attr_unique_id = "-".join(["XAP-Source",self._name,self._xapx00.comPort, hashlib.sha256(json.dumps(source_inputs).encode()).hexdigest()])
+        self._attr_unique_id = "-".join(["XAP-Source",self._name,self._xapx00.conn_id, hashlib.sha256(json.dumps(source_inputs).encode()).hexdigest()])
 
     def __str__(self):
         return self._name
@@ -430,7 +432,7 @@ class XAPZone(MediaPlayerEntity):
         self._active_source = SRC_OFF
         self._poweroff_source = SRC_OFF
         self._first_connect = 0
-        self._attr_unique_id = "-".join(["XAP-Zone",self._name,self._xapx00.comPort, hashlib.sha256(json.dumps(self._outputs).encode()).hexdigest()])
+        self._attr_unique_id = "-".join(["XAP-Zone",self._name,self._xapx00.conn_id, hashlib.sha256(json.dumps(self._outputs).encode()).hexdigest()])
 
     def __str__(self):
         return self._name
