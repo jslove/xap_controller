@@ -2,13 +2,30 @@
   "config": {
     "step": {
       "user": {
-        "title": "XAP Controller — Connection",
+        "title": "XAP Controller — Device",
+        "data": {
+          "name": "Name",
+          "XAPType": "Device type",
+          "stereo": "Stereo mode",
+          "connection_type": "Connection type"
+        }
+      },
+      "serial": {
+        "title": "XAP Controller — Serial Connection",
         "data": {
           "path": "Serial port path",
-          "name": "Name",
-          "XAPType": "XAP unit type",
           "baud": "Baud rate",
-          "stereo": "Stereo mode"
+          "proceed_anyway": "Proceed even if connection fails"
+        }
+      },
+      "telnet": {
+        "title": "XAP Controller — Telnet Connection",
+        "data": {
+          "host": "Host / IP address",
+          "port": "Port",
+          "telnet_username": "Username",
+          "telnet_password": "Password",
+          "proceed_anyway": "Proceed even if connection fails"
         }
       },
       "sources_zones": {
@@ -21,24 +38,41 @@
       }
     },
     "error": {
-      "cannot_connect": "Unable to connect to the XAP unit. Check the path and baud rate. You may still proceed if the connection is intermittent.",
+      "cannot_connect": "Unable to connect to the XAP unit. Check your connection settings. You may still proceed if the connection is intermittent.",
       "invalid_sources": "Invalid sources JSON. Expected an object mapping names to lists of channel specs.",
       "invalid_zones": "Invalid zones JSON. Expected an object mapping names to lists of channel specs."
     },
     "abort": {
-      "already_configured": "This XAP unit (serial port) is already configured."
+      "already_configured": "This XAP unit is already configured."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "XAP Controller — Connection",
+        "title": "XAP Controller — Device",
+        "data": {
+          "name": "Name",
+          "XAPType": "Device type",
+          "stereo": "Stereo mode",
+          "connection_type": "Connection type"
+        }
+      },
+      "serial": {
+        "title": "XAP Controller — Serial Connection",
         "data": {
           "path": "Serial port path",
-          "name": "Name",
-          "XAPType": "XAP unit type",
           "baud": "Baud rate",
-          "stereo": "Stereo mode"
+          "proceed_anyway": "Proceed even if connection fails"
+        }
+      },
+      "telnet": {
+        "title": "XAP Controller — Telnet Connection",
+        "data": {
+          "host": "Host / IP address",
+          "port": "Port",
+          "telnet_username": "Username",
+          "telnet_password": "Password",
+          "proceed_anyway": "Proceed even if connection fails"
         }
       },
       "sources_zones": {

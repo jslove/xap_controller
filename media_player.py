@@ -128,6 +128,7 @@ from XAPX00 import __version__ as XAPVER, XAPX00, XAPCommError, XAPRespError
 
 from .config_flow import (
     CONF_PATH, CONF_SOURCES, CONF_ZONES, CONF_TYPE, CONF_STEREO, CONF_BAUD,
+    CONF_CONNECTION_TYPE, CONF_HOST, CONF_PORT, CONF_TELNET_USERNAME, CONF_TELNET_PASSWORD,
 )
 
 DOMAIN = 'xap_controller'
@@ -166,7 +167,6 @@ def handle_xap_exceptions(func):
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up XAP Controller media player entities from a config entry."""
-    path    = entry.data[CONF_PATH]
     sources = json.loads(entry.data[CONF_SOURCES])
     zones   = json.loads(entry.data[CONF_ZONES])
 
@@ -174,15 +174,31 @@ async def async_setup_entry(hass, entry, async_add_entities):
     _LOGGER.debug('xap_controller: XAPX00 version: {}'.format(XAPVER))
     _LOGGER.debug('XAP Type: {}'.format(entry.data.get(CONF_TYPE)))
 
-    xapconn = XAPX00(path, XAPType=entry.data.get(CONF_TYPE, "XAP800"))
+    conn_type = entry.data.get(CONF_CONNECTION_TYPE, "serial")
+    xap_type  = entry.data.get(CONF_TYPE, "XAP800")
+
+    if conn_type == "telnet":
+        xapconn = XAPX00(
+            connection_type="telnet",
+            telnet_host=entry.data[CONF_HOST],
+            telnet_port=entry.data.get(CONF_PORT, 23),
+            telnet_username=entry.data.get(CONF_TELNET_USERNAME, "clearone"),
+            telnet_password=entry.data.get(CONF_TELNET_PASSWORD, "converge"),
+            XAPType=xap_type,
+        )
+        conn_label = entry.data[CONF_HOST]
+    else:
+        xapconn = XAPX00(entry.data[CONF_PATH], XAPType=xap_type)
+        xapconn.baudRate = entry.data.get(CONF_BAUD, 38400)
+        conn_label = entry.data[CONF_PATH]
+
     xapconn.stereo    = 1 if entry.data.get(CONF_STEREO, False) else 0
-    xapconn.baudRate  = entry.data.get(CONF_BAUD, 38400)
     xapconn.convertDb = 1
 
     # Entities can use xapconn.connectionLive to test connection state
     connected = await hass.async_add_executor_job(xapconn.test_connection)
     if not connected:
-        _LOGGER.warning('Not connected to %s', path)
+        _LOGGER.warning('Not connected to %s', conn_label)
 
     source_objs = []
     zonesources = {}
