@@ -24,8 +24,7 @@
           "host": "Host / IP address",
           "port": "Port",
           "telnet_username": "Username",
-          "telnet_password": "Password",
-          "proceed_anyway": "Proceed even if connection fails"
+          "telnet_password": "Password"
         }
       },
       "sources_zones": {
@@ -71,8 +70,7 @@
           "host": "Host / IP address",
           "port": "Port",
           "telnet_username": "Username",
-          "telnet_password": "Password",
-          "proceed_anyway": "Proceed even if connection fails"
+          "telnet_password": "Password"
         }
       },
       "sources_zones": {

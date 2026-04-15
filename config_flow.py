@@ -147,22 +147,12 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_telnet(self, user_input=None):
         """Step 2b: telnet connection parameters."""
-        errors = {}
-
+        # No connection test here — the device often allows only one concurrent
+        # telnet session, so testing from the config flow would disrupt a running
+        # integration. Validation happens when the entry is loaded.
         if user_input is not None:
-            merged = {**self._connection_data, **user_input}
-            try:
-                connected = await self.hass.async_add_executor_job(
-                    lambda: _build_xapconn(merged).test_connection()
-                )
-                if not connected:
-                    errors["base"] = "cannot_connect"
-            except Exception:
-                errors["base"] = "cannot_connect"
-
-            if not errors or user_input.get("proceed_anyway"):
-                self._connection_data = merged
-                return await self.async_step_sources_zones()
+            self._connection_data = {**self._connection_data, **user_input}
+            return await self.async_step_sources_zones()
 
         schema = vol.Schema(
             {
@@ -170,14 +160,13 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_PORT, default=23): int,
                 vol.Optional(CONF_TELNET_USERNAME, default="clearone"): str,
                 vol.Optional(CONF_TELNET_PASSWORD, default="converge"): str,
-                vol.Optional("proceed_anyway", default=False): bool,
             }
         )
 
         return self.async_show_form(
             step_id="telnet",
             data_schema=schema,
-            errors=errors,
+            errors={},
         )
 
     async def async_step_sources_zones(self, user_input=None):
@@ -322,23 +311,12 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_telnet(self, user_input=None):
         """Step 2b: telnet connection parameters."""
-        errors = {}
+        # No connection test — see ConfigFlow.async_step_telnet for rationale.
         current = self._entry.data
 
         if user_input is not None:
-            merged = {**self._connection_data, **user_input}
-            try:
-                connected = await self.hass.async_add_executor_job(
-                    lambda: _build_xapconn(merged).test_connection()
-                )
-                if not connected:
-                    errors["base"] = "cannot_connect"
-            except Exception:
-                errors["base"] = "cannot_connect"
-
-            if not errors:
-                self._connection_data = merged
-                return await self.async_step_sources_zones()
+            self._connection_data = {**self._connection_data, **user_input}
+            return await self.async_step_sources_zones()
 
         schema = vol.Schema(
             {
