@@ -169,11 +169,17 @@ def handle_xap_exceptions(func):
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Migrate legacy media_player YAML config to a config entry."""
     from homeassistant.config_entries import SOURCE_IMPORT
+    from .config_flow import CONF_PATH, CONF_SOURCES, CONF_ZONES, CONF_TYPE, CONF_STEREO, CONF_BAUD
+    from homeassistant.const import CONF_NAME
+    # Only pass known serializable keys — HA injects internal values like
+    # scan_interval (datetime.timedelta) that cannot be stored as JSON.
+    _KNOWN_KEYS = {CONF_PATH, CONF_NAME, CONF_SOURCES, CONF_ZONES, CONF_TYPE, CONF_STEREO, CONF_BAUD}
+    import_data = {k: v for k, v in config.items() if k in _KNOWN_KEYS}
     hass.async_create_task(
         hass.config_entries.flow.async_init(
             "xap_controller",
             context={"source": SOURCE_IMPORT},
-            data=dict(config),
+            data=import_data,
         )
     )
 
