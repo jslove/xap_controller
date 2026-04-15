@@ -167,8 +167,15 @@ def handle_xap_exceptions(func):
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Legacy YAML platform setup — config entries are used instead."""
-    pass
+    """Migrate legacy media_player YAML config to a config entry."""
+    from homeassistant.config_entries import SOURCE_IMPORT
+    hass.async_create_task(
+        hass.config_entries.flow.async_init(
+            "xap_controller",
+            context={"source": SOURCE_IMPORT},
+            data=dict(config),
+        )
+    )
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
