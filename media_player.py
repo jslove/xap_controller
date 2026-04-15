@@ -276,7 +276,11 @@ class XAPSource(MediaPlayerEntity):
     async def async_added_to_hass(self):
         """Run after entity is added — safe place for blocking I/O."""
         if self.connectionLive():
-            await self._firstConnect()
+            try:
+                await self._firstConnect()
+            except HomeAssistantError as e:
+                _LOGGER.warning("source %s: firstConnect failed (%s), going offline", self, e)
+                self._startOffline()
         else:
             self._startOffline()
         _LOGGER.info("source {} set up".format(self.__str__()))
@@ -460,7 +464,11 @@ class XAPZone(MediaPlayerEntity):
     async def async_added_to_hass(self):
         """Run after entity is added — safe place for blocking I/O."""
         if self.connectionLive():
-            await self._firstConnect()
+            try:
+                await self._firstConnect()
+            except HomeAssistantError as e:
+                _LOGGER.warning("zone %s: firstConnect failed (%s), going offline", self, e)
+                await self._startOffline()
         else:
             await self._startOffline()
         _LOGGER.info("zone {} set up".format(self.__str__()))
