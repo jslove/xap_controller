@@ -118,6 +118,7 @@ import logging
 import functools
 import json
 import hashlib
+import threading
 
 from homeassistant.components.media_player import MediaPlayerEntity
 import homeassistant.components.media_player as MP
@@ -195,6 +196,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             conn.stereo    = stereo
             conn.convertDb = 1
             conn.conn_id   = entry.data[CONF_HOST]
+            conn._lock     = threading.Lock()
             return conn
     else:
         conn_label = entry.data[CONF_PATH]
@@ -204,6 +206,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             conn.stereo    = stereo
             conn.convertDb = 1
             conn.conn_id   = entry.data[CONF_PATH]
+            conn._lock     = threading.Lock()
             return conn
 
     xapconn = await hass.async_add_executor_job(_make_conn)
@@ -262,6 +265,13 @@ class XAPSource(MediaPlayerEntity):
 
     def connectionLive(self):
         return self._xapx00.connectionLive
+
+    async def _xap(self, fn):
+        """Run fn in an executor thread while holding the connection lock."""
+        def _locked():
+            with self._xapx00._lock:
+                return fn()
+        return await self.hass.async_add_executor_job(_locked)
 
     async def async_added_to_hass(self):
         """Run after entity is added — safe place for blocking I/O."""
@@ -358,7 +368,7 @@ class XAPSource(MediaPlayerEntity):
         if not self.connectionLive():
             return self._volume
         vinp = self._inputs[0]
-        gain = await self.hass.async_add_executor_job(
+        gain = await self._xap(
             lambda: self._xapx00.getPropGain(vinp['CHAN'], group="I", unitCode=vinp['UNIT'])
         )
         self._volume = gain
@@ -368,7 +378,7 @@ class XAPSource(MediaPlayerEntity):
     async def async_set_volume_level(self, volume):
         """Set volume level, range 0..1."""
         for s in self._inputs:
-            volume = await self.hass.async_add_executor_job(
+            volume = await self._xap(
                 lambda s=s: self._xapx00.setPropGain(s['CHAN'], volume,
                                                      isAbsolute=1, group="I", unitCode=s['UNIT'])
             )
@@ -377,19 +387,19 @@ class XAPSource(MediaPlayerEntity):
     @handle_xap_exceptions
     async def async_mute_volume(self, mute=2):
         """Blocking XAP call — run in executor."""
-        self._isMuted = await self.hass.async_add_executor_job(
+        self._isMuted = await self._xap(
             lambda: self._xapx00.setMute(self._inputs[0]['CHAN'], group="I",
                                          isMuted=int(mute), unitCode=self._inputs[0]['UNIT'])
         )
         for s in self._inputs[1:]:
-            self._isMuted = await self.hass.async_add_executor_job(
+            self._isMuted = await self._xap(
                 lambda s=s: self._xapx00.setMute(s['CHAN'], group="I",
                                                  isMuted=self._isMuted, unitCode=s['UNIT'])
             )
 
     @handle_xap_exceptions
     async def _get_mute_status(self):
-        self._isMuted = await self.hass.async_add_executor_job(
+        self._isMuted = await self._xap(
             lambda: self._xapx00.getMute(self._inputs[0]['CHAN'], group="I",
                                          unitCode=self._inputs[0]['UNIT'])
         )
@@ -398,7 +408,7 @@ class XAPSource(MediaPlayerEntity):
     async def async_turn_on(self):
         """Turn the media player on."""
         if not self.connectionLive():
-            live = await self.hass.async_add_executor_job(self._xapx00.test_connection)
+            live = await self._xap(self._xapx00.test_connection)
             if not live:
                 return
         if not self._first_connect:
@@ -439,6 +449,13 @@ class XAPZone(MediaPlayerEntity):
 
     def connectionLive(self):
         return self._xapx00.connectionLive
+
+    async def _xap(self, fn):
+        """Run fn in an executor thread while holding the connection lock."""
+        def _locked():
+            with self._xapx00._lock:
+                return fn()
+        return await self.hass.async_add_executor_job(_locked)
 
     async def async_added_to_hass(self):
         """Run after entity is added — safe place for blocking I/O."""
@@ -504,7 +521,7 @@ class XAPZone(MediaPlayerEntity):
             XUNIT, XOUT = self.parse_output(xOut)
             if actsrc != SRC_OFF and actsrc != source:
                 XIN, XINGRP = self._sources[actsrc].getSource(XUNIT, cnt)
-                await self.hass.async_add_executor_job(
+                await self._xap(
                     lambda XIN=XIN, XOUT=XOUT, XINGRP=XINGRP, XUNIT=XUNIT:
                         self._xapx00.setMatrixRouting(XIN, XOUT, 0, inGroup=XINGRP, unitCode=XUNIT)
                 )
@@ -512,7 +529,7 @@ class XAPZone(MediaPlayerEntity):
             if source != SRC_OFF:
                 XIN, XINGRP = self._sources[source].getSource(XUNIT, cnt)
                 ON = 3 if (issubclass(type(XIN), int) and XIN <= (self._xapx00.matrixGeo-4)) else 1
-                await self.hass.async_add_executor_job(
+                await self._xap(
                     lambda XIN=XIN, XOUT=XOUT, ON=ON, XINGRP=XINGRP, XUNIT=XUNIT:
                         self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup=XINGRP, unitCode=XUNIT)
                 )
@@ -530,7 +547,7 @@ class XAPZone(MediaPlayerEntity):
             if xIn != self._sources[SRC_OFF]:
                 XUNIT, XOUT = self.parse_output(self._outputs[0])
                 XIN, XINGRP = xIn.getSource(XUNIT)
-                z_state = int(await self.hass.async_add_executor_job(
+                z_state = int(await self._xap(
                     lambda XIN=XIN, XOUT=XOUT, XINGRP=XINGRP, XUNIT=XUNIT:
                         self._xapx00.getMatrixRouting(XIN, XOUT, inGroup=XINGRP, unitCode=XUNIT)
                 ))
@@ -579,7 +596,7 @@ class XAPZone(MediaPlayerEntity):
         """Turn zone on"""
         _LOGGER.debug("turn_on {}".format(self))
         if not self.connectionLive():
-            live = await self.hass.async_add_executor_job(self._xapx00.test_connection)
+            live = await self._xap(self._xapx00.test_connection)
             if not live:
                 return
         if not self._first_connect:
@@ -591,7 +608,7 @@ class XAPZone(MediaPlayerEntity):
         """Turn off zone"""
         _LOGGER.debug("turn_off {}".format(self))
         if not self.connectionLive():
-            live = await self.hass.async_add_executor_job(self._xapx00.test_connection)
+            live = await self._xap(self._xapx00.test_connection)
             if not live:
                 return
         self._poweroff_source = self._active_source
@@ -604,12 +621,12 @@ class XAPZone(MediaPlayerEntity):
         """Blocking XAP call — run in executor."""
         if not self.connectionLive(): return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
-        muted = await self.hass.async_add_executor_job(
+        muted = await self._xap(
             lambda: self._xapx00.setMute(XOUT, group="O", isMuted=int(mute), unitCode=XUNIT)
         )
         for output in self._outputs[1:]:
             XUNIT, XOUT = self.parse_output(output)
-            muted = await self.hass.async_add_executor_job(
+            muted = await self._xap(
                 lambda XOUT=XOUT, muted=muted, XUNIT=XUNIT:
                     self._xapx00.setMute(XOUT, group="O", isMuted=int(muted), unitCode=XUNIT)
             )
@@ -619,7 +636,7 @@ class XAPZone(MediaPlayerEntity):
     async def _get_mute_status(self):
         if not self.connectionLive(): return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
-        self._isMuted = bool(await self.hass.async_add_executor_job(
+        self._isMuted = bool(await self._xap(
             lambda: self._xapx00.getMute(XOUT, group="O", unitCode=XUNIT)
         ))
         return self._isMuted
@@ -632,7 +649,7 @@ class XAPZone(MediaPlayerEntity):
         for output in self._outputs:
             XUNIT, XOUT = self.parse_output(output)
             _LOGGER.debug("Set Volume for output {} to {}".format(output, volume))
-            volume = await self.hass.async_add_executor_job(
+            volume = await self._xap(
                 lambda XOUT=XOUT, XUNIT=XUNIT:
                     self._xapx00.setPropGain(XOUT, volume, group="O", unitCode=XUNIT)
             )
@@ -643,7 +660,7 @@ class XAPZone(MediaPlayerEntity):
         """Blocking XAP call — run in executor."""
         if not self.connectionLive(): return
         XUNIT, XOUT = self.parse_output(self._outputs[0])
-        gain = await self.hass.async_add_executor_job(
+        gain = await self._xap(
             lambda: self._xapx00.getPropGain(XOUT, group="O", unitCode=XUNIT)
         )
         self._volume = gain
@@ -665,7 +682,7 @@ class XAPZone(MediaPlayerEntity):
             XUNIT, XOUT = self.parse_output(xOut)
             for xIn in self._sources.values():
                 XIN, XINGRP = xIn.getSource(XUNIT, cnt)
-                await self.hass.async_add_executor_job(
+                await self._xap(
                     lambda XIN=XIN, XOUT=XOUT, XINGRP=XINGRP, XUNIT=XUNIT:
                         self._xapx00.setMatrixLevel(XIN, XOUT, self._defaultMatrixLevel,
                                                     inGroup=XINGRP, unitCode=XUNIT)
