@@ -166,6 +166,11 @@ def handle_xap_exceptions(func):
     return wrapper
 
 
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+    """Legacy YAML platform setup — config entries are used instead."""
+    pass
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up XAP Controller media player entities from a config entry."""
     sources = json.loads(entry.data[CONF_SOURCES])
