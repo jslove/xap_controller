@@ -146,27 +146,50 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_telnet(self, user_input=None):
-        """Step 2b: telnet connection parameters."""
-        # No connection test here — the device often allows only one concurrent
-        # telnet session, so testing from the config flow would disrupt a running
-        # integration. Validation happens when the entry is loaded.
+        """Step 2b: telnet connection parameters (new setup only)."""
+        description_placeholders = {"test_result": ""}
+        errors = {}
+
         if user_input is not None:
-            self._connection_data = {**self._connection_data, **user_input}
-            return await self.async_step_sources_zones()
+            if user_input.get("test_connection"):
+                # Run the test and show the result; redisplay the form.
+                merged = {**self._connection_data, **user_input}
+                try:
+                    connected = await self.hass.async_add_executor_job(
+                        lambda: _build_xapconn(merged).test_connection()
+                    )
+                    description_placeholders["test_result"] = (
+                        "✓ Connection successful" if connected else "✗ Connection failed"
+                    )
+                    if not connected:
+                        errors["base"] = "cannot_connect"
+                except Exception as e:
+                    description_placeholders["test_result"] = f"✗ Connection failed: {e}"
+                    errors["base"] = "cannot_connect"
+            else:
+                self._connection_data = {**self._connection_data, **user_input}
+                return await self.async_step_sources_zones()
+
+        host = user_input.get(CONF_HOST, "") if user_input else ""
+        port = user_input.get(CONF_PORT, 23) if user_input else 23
+        username = user_input.get(CONF_TELNET_USERNAME, "clearone") if user_input else "clearone"
+        password = user_input.get(CONF_TELNET_PASSWORD, "converge") if user_input else "converge"
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_HOST): str,
-                vol.Optional(CONF_PORT, default=23): int,
-                vol.Optional(CONF_TELNET_USERNAME, default="clearone"): str,
-                vol.Optional(CONF_TELNET_PASSWORD, default="converge"): str,
+                vol.Required(CONF_HOST, default=host): str,
+                vol.Optional(CONF_PORT, default=port): int,
+                vol.Optional(CONF_TELNET_USERNAME, default=username): str,
+                vol.Optional(CONF_TELNET_PASSWORD, default=password): str,
+                vol.Optional("test_connection", default=False): bool,
             }
         )
 
         return self.async_show_form(
             step_id="telnet",
             data_schema=schema,
-            errors={},
+            errors=errors,
+            description_placeholders=description_placeholders,
         )
 
     async def async_step_sources_zones(self, user_input=None):

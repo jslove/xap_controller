@@ -20,11 +20,13 @@
       },
       "telnet": {
         "title": "XAP Controller — Telnet Connection",
+        "description": "{test_result}",
         "data": {
           "host": "Host / IP address",
           "port": "Port",
           "telnet_username": "Username",
-          "telnet_password": "Password"
+          "telnet_password": "Password",
+          "test_connection": "Test connection"
         }
       },
       "sources_zones": {
@@ -66,11 +68,13 @@
       },
       "telnet": {
         "title": "XAP Controller — Telnet Connection",
+        "description": "{test_result}",
         "data": {
           "host": "Host / IP address",
           "port": "Port",
           "telnet_username": "Username",
-          "telnet_password": "Password"
+          "telnet_password": "Password",
+          "test_connection": "Test connection"
         }
       },
       "sources_zones": {
