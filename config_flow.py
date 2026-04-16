@@ -147,24 +147,19 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_telnet(self, user_input=None):
         """Step 2b: telnet connection parameters (new setup only)."""
-        description_placeholders = {"test_result": ""}
         errors = {}
 
         if user_input is not None:
             if user_input.get("test_connection"):
-                # Run the test and show the result; redisplay the form.
+                # Run the test and redisplay the form with the result.
                 merged = {**self._connection_data, **user_input}
                 try:
                     connected = await self.hass.async_add_executor_job(
                         lambda: _build_xapconn(merged).test_connection()
                     )
-                    description_placeholders["test_result"] = (
-                        "✓ Connection successful" if connected else "✗ Connection failed"
-                    )
                     if not connected:
                         errors["base"] = "cannot_connect"
-                except Exception as e:
-                    description_placeholders["test_result"] = f"✗ Connection failed: {e}"
+                except Exception:
                     errors["base"] = "cannot_connect"
             else:
                 self._connection_data = {**self._connection_data, **user_input}
@@ -189,7 +184,6 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="telnet",
             data_schema=schema,
             errors=errors,
-            description_placeholders=description_placeholders,
         )
 
     async def async_step_sources_zones(self, user_input=None):

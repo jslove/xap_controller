@@ -20,7 +20,6 @@
       },
       "telnet": {
         "title": "XAP Controller — Telnet Connection",
-        "description": "{test_result}",
         "data": {
           "host": "Host / IP address",
           "port": "Port",
@@ -68,7 +67,6 @@
       },
       "telnet": {
         "title": "XAP Controller — Telnet Connection",
-        "description": "{test_result}",
         "data": {
           "host": "Host / IP address",
           "port": "Port",
