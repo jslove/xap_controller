@@ -359,7 +359,7 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="telnet",
             data_schema=schema,
-            errors=errors,
+            errors={},
         )
 
     async def async_step_sources_zones(self, user_input=None):
