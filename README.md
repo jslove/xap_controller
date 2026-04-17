@@ -1,4 +1,4 @@
-## The XAPController platform allows the use of a ClearOne Convgerge Pro v1, XAP 400 or 800 unit as an audio routing matrix with HomeAssistant.
+## The XAPController platform allows the use of a ClearOne Converge Pro v1, XAP 400 or 800 unit as an audio routing matrix with HomeAssistant.
 
 At this time, it is set up only for routing audio, not for use with microphones.
 
