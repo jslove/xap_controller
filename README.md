@@ -1,16 +1,14 @@
-## The XAPController platform allows the use of a ClearOne XAP 400 or 800 unit as an audio routing matrix with HomeAssistant.
+## The XAPController platform allows the use of a ClearOne Convgerge Pro v1, XAP 400 or 800 unit as an audio routing matrix with HomeAssistant.
 
 At this time, it is set up only for routing audio, not for use with microphones.
-
-Support for interfacing with ClearOne XAP800 and XAP400 units via serial port.
 
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/media_player.xap_controller/
 (no docs there until release)
 
-There are two components in the platform: output Zones and input Sources.  The input sources are assumed to be XAP type I inputs, the output zones type O outputs.
+There are two components in the platform: output Zones and input Sources.  The input sources are assumed to be type I inputs, the output zones type O outputs.
 
-The XAP system can have multple units linked together.  The configured Sources and Zones can specify only the channel for input or output, in which case it is assumed they are on unit 0.  They can also specify the unit, and optionally, for sources, an expansion bus that the source is also mapped to, so that it can be used on other units in the systems.  In this case, list the unit:channel of the source, and then the expansion channel and optinoally expansion group (E or P).  When sources or zones are specified with units and expansion buses, the items should be listed as a string of the format "<Unit#>:<Channel#>:<Expansion Bus Channel Letter>:<Expansion BUs Group>".  See below for an example.  For the expansion bus setup to work the matrix needs to have the sources mapped to the expansin channels through the G-Ware software.
+The system can have multple units linked together.  The configured Sources and Zones can specify only the channel for input or output, in which case it is assumed they are on unit 0.  They can also specify the unit, and optionally, for sources, an expansion bus that the source is also mapped to, so that it can be used on other units in the systems.  In this case, list the unit:channel of the source, and then the expansion channel and optinoally expansion group (E or P).  When sources or zones are specified with units and expansion buses, the items should be listed as a string of the format "<Unit#>:<Channel#>:<Expansion Bus Channel Letter>:<Expansion BUs Group>".  See below for an example.  For the expansion bus setup to work the matrix needs to have the sources mapped to the expansin channels through the G-Ware software.
 
 The system can assume that the channels are set up for stereo, so that there are 2 channels paired 
 together.  If stereo=1, the module will take each action twice, once on the listed source/zone number and again on the source/zone + 1.  This functionality may be removed in the future to promote clarity, so if ia stereo setup is used, it is recommneded to list each channel explicitly.
