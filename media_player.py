@@ -181,7 +181,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             data=import_data,
         )
     )
-    hass.components.persistent_notification.async_create(
+    from homeassistant.components.persistent_notification import async_create as pn_create
+    pn_create(
+        hass,
         "XAP Controller is now configured via the UI. "
         "Please remove it from your configuration.yaml to avoid this message.",
         title="XAP Controller: remove YAML config",
