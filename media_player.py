@@ -117,7 +117,6 @@ media_player:
 import logging
 import functools
 import json
-import hashlib
 import threading
 
 from homeassistant.components.media_player import MediaPlayerEntity
@@ -181,6 +180,12 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             context={"source": SOURCE_IMPORT},
             data=import_data,
         )
+    )
+    hass.components.persistent_notification.async_create(
+        "XAP Controller is now configured via the UI. "
+        "Please remove it from your configuration.yaml to avoid this message.",
+        title="XAP Controller: remove YAML config",
+        notification_id="xap_controller_yaml_deprecated",
     )
 
 
@@ -273,7 +278,8 @@ class XAPSource(MediaPlayerEntity):
         self._volume = 0
         self._isMuted = 1
         self._first_connect = 0
-        self._attr_unique_id = "-".join(["XAP-Source",self._name,self._xapx00.conn_id, hashlib.sha256(json.dumps(source_inputs).encode()).hexdigest()])
+        channels = ",".join(str(i) for i in source_inputs)
+        self._attr_unique_id = f"XAP-Source-{self._xapx00.conn_id}-{channels}"
 
     def __str__(self):
         return self._name
@@ -464,7 +470,8 @@ class XAPZone(MediaPlayerEntity):
         self._active_source = SRC_OFF
         self._poweroff_source = SRC_OFF
         self._first_connect = 0
-        self._attr_unique_id = "-".join(["XAP-Zone",self._name,self._xapx00.conn_id, hashlib.sha256(json.dumps(self._outputs).encode()).hexdigest()])
+        channels = ",".join(str(o) for o in self._outputs)
+        self._attr_unique_id = f"XAP-Zone-{self._xapx00.conn_id}-{channels}"
 
     def __str__(self):
         return self._name

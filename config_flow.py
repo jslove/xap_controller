@@ -209,6 +209,9 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_PATH, self._connection_data.get(CONF_HOST, "XAP")
                     ),
                 )
+                unique_id = self._connection_data.get(CONF_HOST) or self._connection_data.get(CONF_PATH, "xap")
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
                 return self.async_create_entry(title=title, data=data)
 
         schema = vol.Schema(
