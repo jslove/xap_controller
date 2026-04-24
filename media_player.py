@@ -636,6 +636,7 @@ class XAPZone(MediaPlayerEntity):
                 return
         if not self._first_connect:
             await self._firstConnect()
+        await self.async_select_source(self._poweroff_source)        
         await self.async_mute_volume(mute=0)
         self._state = STATE_ON
 
@@ -647,8 +648,8 @@ class XAPZone(MediaPlayerEntity):
             if not live:
                 return
         self._poweroff_source = self._active_source
-        await self.async_select_source(SRC_OFF)
         await self.async_mute_volume(1)
+        await self.async_select_source(SRC_OFF)
         self._state = STATE_OFF
 
     @handle_xap_exceptions
