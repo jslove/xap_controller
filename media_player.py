@@ -319,6 +319,8 @@ class XAPSource(MediaPlayerEntity):
         await self._get_mute_status()
         if self._isMuted:
             self._state = STATE_OFF
+        else:
+            self._state = STATE_ON
         await self.async_mute_volume(self._isMuted)  # sync
         self._first_connect = 1
         _LOGGER.debug('%s: firstConnect complete' % self._name)
@@ -648,7 +650,7 @@ class XAPZone(MediaPlayerEntity):
             if not live:
                 return
         self._poweroff_source = self._active_source
-        await self.async_mute_volume(1)
+        await self.async_mute_volume(mute=1)
         await self.async_select_source(SRC_OFF)
         self._state = STATE_OFF
 
