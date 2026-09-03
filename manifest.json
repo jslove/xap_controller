@@ -8,5 +8,5 @@
     "version": "2026.04.20",
     "iot_class": "local_polling",
     "requirements": [
-      "XAPX00@git+https://github.com/jslove/XAPX00.git@2026.04.22" ]
+      "XAPX00@git+https://github.com/jslove/XAPX00.git@2026.05.13-async" ]
   }
