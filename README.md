@@ -10,8 +10,24 @@ There are two components in the platform: output Zones and input Sources.  The i
 
 The system can have multple units linked together.  The configured Sources and Zones can specify only the channel for input or output, in which case it is assumed they are on unit 0.  They can also specify the unit, and optionally, for sources, an expansion bus that the source is also mapped to, so that it can be used on other units in the systems.  In this case, list the unit:channel of the source, and then the expansion channel and optinoally expansion group (E or P).  When sources or zones are specified with units and expansion buses, the items should be listed as a string of the format "<Unit#>:<Channel#>:<Expansion Bus Channel Letter>:<Expansion BUs Group>".  See below for an example.  For the expansion bus setup to work the matrix needs to have the sources mapped to the expansin channels through the G-Ware software.
 
-The system can assume that the channels are set up for stereo, so that there are 2 channels paired 
-together.  If stereo=1, the module will take each action twice, once on the listed source/zone number and again on the source/zone + 1.  This functionality may be removed in the future to promote clarity, so if ia stereo setup is used, it is recommneded to list each channel explicitly.
+**The `stereo` option is deprecated and will be removed in a future release.**  If stereo=1, the module takes each action twice, once on the listed source/zone number and again on the source/zone + 1.  It overlaps the explicit multi-channel list below, and the two are unsafe in combination: a zone listed as `[3, 4]` with `stereo: 1` writes crosspoints for 3&4 and then 4&5, and channel 5 belongs to some other zone.  List each channel explicitly instead:
+
+```yaml
+# deprecated
+stereo: 1
+zones:
+  'Office':
+    - 3
+
+# preferred
+stereo: 0
+zones:
+  'Office':
+    - 3
+    - 4
+```
+
+See [issue #23](https://github.com/jslove/xap_controller/issues/23) for the removal plan.
 
 For each source or zone, multiple channels can be listed, as a list.  If multiple channels are listed for a source and an output, they will be paired sequentially, source item 1 to zone item 1, source item 2 to zone item 2, etc.  If there are more source channels than zone channels, only the first channels in the source will be used.  If there are more channels in a zone than in the source being applied ot it, the source channels will be repeated.  This multiple channel apporach can be used to handle stereo (instead of the stereo=1 approach), but it was added to handle surround sound sources / zones. The XAP system will mix multiple source channels applied to one output zone channel.
 
@@ -91,7 +107,7 @@ media_player:
    sources are listed as either a digit, indicating the input channel on unit 0, or else a string of the format:  "<unit#>:<input#>:<bus letter>:<bus type>. Bus and Bus type are optional, but are needed if using more than 1 unit and you want a source to be available on outputs in other units.
 * path: serial device path (can be a virtual serial port, using socat for example)
 * name: the name of the platform instance
-* stereo: 1=stereo, 0=mono  If stereo=1, each action will be performed twice on the input (output) and input+1 (output)+1
+* stereo: **deprecated** — 1=stereo, 0=mono.  If stereo=1, each action will be performed twice on the input (output) and input+1 (output)+1.  List channels explicitly instead; see above.
 * baud: baud rate of serial port, 38400 (default), 9600, 19200, 57600
 * XAPType: XAP unit type, eithr XAP800 (default) or XAP400
 
