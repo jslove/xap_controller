@@ -59,7 +59,7 @@ def _build_xapconn(data):
     conn_type = data.get(CONF_CONNECTION_TYPE, "serial")
     xap_type = data.get(CONF_TYPE, "XAP800")
     if conn_type == "telnet":
-        xapconn = XAPX00.XAPX00(
+        xapconn = XAPX00(
             connection_type="telnet",
             telnet_host=data.get(CONF_HOST),
             telnet_port=data.get(CONF_PORT, 23),
@@ -68,11 +68,14 @@ def _build_xapconn(data):
             XAPType=xap_type,
         )
     else:
-        xapconn = XAPX00.XAPX00(
+        # baudRate must be a constructor argument, not assigned afterwards: the
+        # constructor opens the port, so a later assignment leaves the link running at
+        # the 38400 default and every exchange times out.
+        xapconn = XAPX00(
             data.get(CONF_PATH, "/dev/ttyUSB0"),
+            baudRate=data.get(CONF_BAUD, 38400),
             XAPType=xap_type,
         )
-        xapconn.baudRate = data.get(CONF_BAUD, 38400)
     return xapconn
 
 
@@ -125,6 +128,7 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if not connected:
                     errors["base"] = "cannot_connect"
             except Exception:
+                _LOGGER.exception("XAP connection test failed")
                 errors["base"] = "cannot_connect"
 
             if not errors or user_input.get("proceed_anyway"):
@@ -160,6 +164,7 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if not connected:
                         errors["base"] = "cannot_connect"
                 except Exception:
+                    _LOGGER.exception("XAP connection test failed")
                     errors["base"] = "cannot_connect"
             else:
                 self._connection_data = {**self._connection_data, **user_input}
