@@ -119,11 +119,15 @@ import functools
 import json
 import threading
 
+import voluptuous as vol
+
 from homeassistant.components.media_player import MediaPlayerEntity
 import homeassistant.components.media_player as MP
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature as MPEF
 from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.core import SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+import homeassistant.helpers.config_validation as cv
 from XAPX00 import __version__ as XAPVER, XAPX00, XAPCommError, XAPRespError
 
 from .config_flow import (
@@ -191,6 +195,75 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     )
 
 
+SERVICE_SEND_COMMAND = "send_command"
+
+SEND_COMMAND_SCHEMA = vol.Schema(
+    {
+        vol.Required("command"): cv.string,
+        vol.Optional("unit", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=7)),
+        # `rtnCount` is "keep the last N whitespace-separated tokens of the reply", so a
+        # small value silently truncates: at 2, `LABEL 5 O` returns ["-", "Patio"] and
+        # loses the "3L". 16 is past the longest reply seen, and asking for more tokens
+        # than arrive simply returns what arrived â€” so the default shows the whole line.
+        vol.Optional("return_count", default=16): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=64)
+        ),
+    }
+)
+
+
+def _register_send_command(hass, xapconn):
+    """Expose a raw command channel: `xap_controller.send_command`.
+
+    The point is hands-on work on the unit â€” reading LABEL/MTRX/MAX, trying settings the
+    entities do not model â€” without a second process opening the serial port behind this
+    integration's back. XAPCommand already owns the framing, the device address, the
+    response parsing and the lock, so going through it is both safer and less code than a
+    side channel.
+
+    Registered against the first config entry to set up; the `unit` field addresses other
+    XAPs on the expansion chain, which is the multi-unit case that actually exists.
+    """
+    if hass.services.has_service(DOMAIN, SERVICE_SEND_COMMAND):
+        return
+
+    async def _handle(call):
+        raw = call.data["command"].strip()
+        if not raw:
+            raise ServiceValidationError("command is empty")
+        parts = raw.split()
+        verb, args = parts[0], parts[1:]
+
+        def _run():
+            with xapconn._lock:
+                return xapconn.XAPCommand(
+                    verb, *args,
+                    unitCode=call.data["unit"],
+                    rtnCount=call.data["return_count"],
+                )
+
+        try:
+            result = await hass.async_add_executor_job(_run)
+        except (XAPCommError, XAPRespError) as err:
+            # A refused command is a normal outcome when probing an unfamiliar unit â€”
+            # report it as the answer rather than as an integration failure.
+            return {"command": raw, "error": str(err) or err.__class__.__name__}
+        if isinstance(result, (list, tuple)):
+            result = [str(x) for x in result]
+        else:
+            result = str(result)
+        return {"command": raw, "response": result}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SEND_COMMAND,
+        _handle,
+        schema=SEND_COMMAND_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    _LOGGER.info("Registered %s.%s", DOMAIN, SERVICE_SEND_COMMAND)
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up XAP Controller media player entities from a config entry."""
     sources = json.loads(entry.data[CONF_SOURCES])
@@ -244,6 +317,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     connected = await hass.async_add_executor_job(xapconn.test_connection)
     if not connected:
         _LOGGER.warning('Not connected to %s', conn_label)
+
+    _register_send_command(hass, xapconn)
 
     source_objs = []
     zonesources = {}
