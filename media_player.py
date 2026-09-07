@@ -533,6 +533,11 @@ class XAPZone(MediaPlayerEntity):
             if ":" in output:
                 XUNIT, XOUT =  output.split(":")
             elif output.isdigit():
+                # Unit 0, same as the bare int form. Without this XUNIT is never bound
+                # and the return below raises UnboundLocalError - and a bare numeric
+                # string is a shape _validate_sources_zones accepts and the README's own
+                # examples mix in, so `{"Kitchen": ["3"]}` crashed setup.
+                XUNIT = 0
                 XOUT = int(output)
             else:
                 raise Exception('Invalid Output String')
