@@ -226,8 +226,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     else:
         conn_label = entry.data[CONF_PATH]
         def _make_conn():
-            conn = XAPX00(entry.data[CONF_PATH], XAPType=xap_type)
-            conn.baudRate  = entry.data.get(CONF_BAUD, 38400)
+            # baudRate belongs in the constructor — see _build_xapconn in config_flow.
+            conn = XAPX00(
+                entry.data[CONF_PATH],
+                baudRate=entry.data.get(CONF_BAUD, 38400),
+                XAPType=xap_type,
+            )
             conn.stereo    = stereo
             conn.convertDb = 1
             conn.conn_id   = entry.data[CONF_PATH]
