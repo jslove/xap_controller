@@ -30,17 +30,19 @@
       },
       "sources_zones": {
         "title": "XAP Controller — Sources & Zones",
-        "description": "Enter sources and zones as JSON objects. Keys are names, values are lists of channel specs (integers or strings like \"1:3\" or \"1:9:O:E\").",
+        "description": "Enter sources and zones as JSON objects. Keys are names, values are lists of channel specs (integers or strings like \"1:3\" or \"1:9:O:E\"). Max gain is optional: a JSON object mapping output channel to a dB ceiling, e.g. {\"7\": -15}. It caps how loud that output can ever be driven and sets what 100% volume means. Leave blank to leave the unit's own setting alone.",
         "data": {
           "sources": "Sources (JSON)",
-          "zones": "Zones (JSON)"
+          "zones": "Zones (JSON)",
+          "max_gain": "Max gain per output channel (JSON, optional)"
         }
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to the XAP unit. Check your connection settings. You may still proceed if the connection is intermittent.",
       "invalid_sources": "Invalid sources JSON. Expected an object mapping names to lists of channel specs.",
-      "invalid_zones": "Invalid zones JSON. Expected an object mapping names to lists of channel specs."
+      "invalid_zones": "Invalid zones JSON. Expected an object mapping names to lists of channel specs.",
+      "invalid_max_gain": "Invalid max gain JSON. Expected an object mapping output channel numbers to a dB value between -65 and 20, e.g. {\"7\": -15, \"8\": -15}."
     },
     "abort": {
       "already_configured": "This XAP unit is already configured."
@@ -77,17 +79,19 @@
       },
       "sources_zones": {
         "title": "XAP Controller — Sources & Zones",
-        "description": "Enter sources and zones as JSON objects. Keys are names, values are lists of channel specs (integers or strings like \"1:3\" or \"1:9:O:E\").",
+        "description": "Enter sources and zones as JSON objects. Keys are names, values are lists of channel specs (integers or strings like \"1:3\" or \"1:9:O:E\"). Max gain is optional: a JSON object mapping output channel to a dB ceiling, e.g. {\"7\": -15}. It caps how loud that output can ever be driven and sets what 100% volume means. Leave blank to leave the unit's own setting alone.",
         "data": {
           "sources": "Sources (JSON)",
-          "zones": "Zones (JSON)"
+          "zones": "Zones (JSON)",
+          "max_gain": "Max gain per output channel (JSON, optional)"
         }
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to the XAP unit.",
       "invalid_sources": "Invalid sources JSON. Expected an object mapping names to lists of channel specs.",
-      "invalid_zones": "Invalid zones JSON. Expected an object mapping names to lists of channel specs."
+      "invalid_zones": "Invalid zones JSON. Expected an object mapping names to lists of channel specs.",
+      "invalid_max_gain": "Invalid max gain JSON. Expected an object mapping output channel numbers to a dB value between -65 and 20, e.g. {\"7\": -15, \"8\": -15}."
     }
   }
 }

@@ -24,6 +24,7 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_TELNET_USERNAME = "telnet_username"
 CONF_TELNET_PASSWORD = "telnet_password"
+CONF_MAX_GAIN = "max_gain"
 
 XAP_TYPES = ["XAP800", "XAP400", "CP880", "CP880T", "CP880TA"]
 BAUD_RATES = [9600, 19200, 38400, 57600]
@@ -31,6 +32,42 @@ CONNECTION_TYPES = ["serial", "telnet"]
 
 SOURCES_EXAMPLE = '{"Home Audio": [9], "TV": ["1:11:O:E"]}'
 ZONES_EXAMPLE = '{"Kitchen": [3], "Office": ["2:1", "2:2"]}'
+MAX_GAIN_EXAMPLE = '{"7": -15, "8": -15}'
+
+# The XAP800 output gain range. MAXGAIN is the ceiling GAIN may be set to, and it is
+# what a 1.0 volume_level means: getPropGain/setPropGain express level as a ratio
+# against it, so leaving it at the +20 factory default squeezes every realistic
+# listening level into the bottom 2% of a Home Assistant slider.
+MAX_GAIN_MIN_DB = -65.0
+MAX_GAIN_MAX_DB = 20.0
+
+
+def _validate_max_gain(json_str: str) -> dict:
+    """Parse and validate the per-channel max-gain JSON. Returns the parsed dict.
+
+    Keys are output channel numbers, values a ceiling in dB. Blank means "leave the
+    unit alone", which is the old behaviour.
+    """
+    if not json_str or not json_str.strip():
+        return {}
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError:
+        raise vol.Invalid("invalid_max_gain")
+    if not isinstance(data, dict):
+        raise vol.Invalid("invalid_max_gain")
+    for key, val in data.items():
+        try:
+            channel = int(key)
+        except (TypeError, ValueError):
+            raise vol.Invalid("invalid_max_gain")
+        if channel < 1:
+            raise vol.Invalid("invalid_max_gain")
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            raise vol.Invalid("invalid_max_gain")
+        if not MAX_GAIN_MIN_DB <= float(val) <= MAX_GAIN_MAX_DB:
+            raise vol.Invalid("invalid_max_gain")
+    return data
 
 
 def _validate_sources_zones(json_str: str, label: str) -> dict:
@@ -206,6 +243,11 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except vol.Invalid:
                 errors[CONF_ZONES] = "invalid_zones"
 
+            try:
+                _validate_max_gain(user_input.get(CONF_MAX_GAIN, ""))
+            except vol.Invalid:
+                errors[CONF_MAX_GAIN] = "invalid_max_gain"
+
             if not errors:
                 data = {**self._connection_data, **user_input}
                 title = self._connection_data.get(
@@ -223,6 +265,7 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_SOURCES, default=SOURCES_EXAMPLE): str,
                 vol.Required(CONF_ZONES, default=ZONES_EXAMPLE): str,
+                vol.Optional(CONF_MAX_GAIN, default=""): str,
             }
         )
 
@@ -380,6 +423,11 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
             except vol.Invalid:
                 errors[CONF_ZONES] = "invalid_zones"
 
+            try:
+                _validate_max_gain(user_input.get(CONF_MAX_GAIN, ""))
+            except vol.Invalid:
+                errors[CONF_MAX_GAIN] = "invalid_max_gain"
+
             if not errors:
                 new_data = {**self._entry.data, **self._connection_data, **user_input}
                 self.hass.config_entries.async_update_entry(self._entry, data=new_data)
@@ -392,6 +440,9 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
                 ): str,
                 vol.Required(
                     CONF_ZONES, default=current.get(CONF_ZONES, ZONES_EXAMPLE)
+                ): str,
+                vol.Optional(
+                    CONF_MAX_GAIN, default=current.get(CONF_MAX_GAIN, "")
                 ): str,
             }
         )
