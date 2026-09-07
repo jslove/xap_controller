@@ -154,7 +154,12 @@ SUPPORT_XAP_ZONE = (
 )
 
 SUPPORT_XAP_SOURCE = (
-    MPEF.VOLUME_MUTE |
+    # VOLUME_SET was removed deliberately, to keep a sensitive input gain away from a
+    # slider anyone can drag. The trade-off is that input trim is also where headroom
+    # lives, so the one adjustment that prevents converter clipping becomes reachable
+    # only from the Windows-only Console app. XAPSource already implements
+    # async_set_volume_level and reports volume_level, so this restores the flag only.
+    MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
     MPEF.TURN_ON | MPEF.TURN_OFF
 )
 

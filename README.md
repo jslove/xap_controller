@@ -112,7 +112,7 @@ media_player:
 * XAPType: XAP unit type, eithr XAP800 (default) or XAP400
 
 Setup Notes:
-For the sources, set the gain levels in the Clearone Console app.  They are very sensitive and should be calibrated to 0db.  I have removed the ability to change the source gain levels from the UI to prevent mis-configuation.  It can be added back through the source gode by adding MPEF.VOLUME_SET to the SOURCE capability list (if you need it, for example if you don't have the Console app available).
+For the sources, set the gain levels in the Clearone Console app.  They are very sensitive and should be calibrated to 0db.  Source gain is not adjustable from the UI by default.  If the Console app is not a practical way to set trim, tick **Allow source input gain to be set from the UI** on the Sources & Zones step and the source entities gain a level control.  Leave it off unless you need it: input trim is a calibration control, and anything that treats a `media_player` as a speaker — a broad `media_player.volume_set`, a voice assistant, a HomeKit/Alexa/Google bridge — will reach it once it looks like a volume.
 
 ## Raw command access (`xap_controller.send_command`)
 
