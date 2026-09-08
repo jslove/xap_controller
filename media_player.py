@@ -462,6 +462,22 @@ class XAPSource(MediaPlayerEntity):
         await self.async_mute_volume(mute=1)
         self._state = STATE_OFF
 
+    async def async_update(self):
+        """Re-read level and mute from the unit.
+
+        Sources previously had no update method at all, so their state was whatever
+        `_firstConnect` cached at setup. Anything that changed the unit afterwards - the
+        front panel, G-Ware, a serial command - left the entity stale indefinitely, and
+        a source showing "off" while its channel was plainly unmuted is a confusing
+        place to start debugging silence. Zones already polled; this brings sources into
+        line.
+        """
+        if not self.connectionLive():
+            return
+        await self._get_volume_level()
+        await self._get_mute_status()
+        self._state = STATE_OFF if self._isMuted else STATE_ON
+
 
 class XAPZone(MediaPlayerEntity):
     """
