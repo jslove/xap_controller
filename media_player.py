@@ -134,6 +134,7 @@ from XAPX00 import __version__ as XAPVER, XAPX00, XAPCommError, XAPRespError
 from .config_flow import (
     CONF_PATH, CONF_SOURCES, CONF_ZONES, CONF_TYPE, CONF_STEREO, CONF_BAUD,
     CONF_CONNECTION_TYPE, CONF_HOST, CONF_PORT, CONF_TELNET_USERNAME, CONF_TELNET_PASSWORD,
+    CONF_SOURCE_TRIM,
 )
 
 DOMAIN = 'xap_controller'
@@ -154,14 +155,20 @@ SUPPORT_XAP_ZONE = (
 )
 
 SUPPORT_XAP_SOURCE = (
-    # VOLUME_SET was removed deliberately, to keep a sensitive input gain away from a
-    # slider anyone can drag. The trade-off is that input trim is also where headroom
-    # lives, so the one adjustment that prevents converter clipping becomes reachable
-    # only from the Windows-only Console app. XAPSource already implements
-    # async_set_volume_level and reports volume_level, so this restores the flag only.
-    MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
+    MPEF.VOLUME_MUTE |
     MPEF.TURN_ON | MPEF.TURN_OFF
 )
+
+# Off by default; opt in per entry with `source_trim`.
+#
+# Input gain is a calibration control, not a volume control - it is where headroom lives,
+# and an input left near its MAXGAIN clips the input stage. Exposing it as an ordinary
+# volume slider makes it reachable by everything that treats a media_player as a speaker:
+# media_player.volume_set from any automation, Assist, and the HomeKit/Alexa/Google
+# bridges. The realistic accident is not someone dragging a calibration control on
+# purpose, but a broad "turn the volume down" targeting an area sweeping up the inputs
+# along with the speakers.
+SUPPORT_XAP_SOURCE_WITH_TRIM = SUPPORT_XAP_SOURCE | MPEF.VOLUME_SET
 
 
 def handle_xap_exceptions(func):
@@ -417,6 +424,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "List each channel explicitly instead: a zone of [3] with stereo on becomes "
             "a zone of [3, 4] with stereo off. See issue #23."
         )
+    allow_trim = bool(entry.data.get(CONF_SOURCE_TRIM, False))
 
     # XAPX00.__init__ calls test_connection() internally, which uses
     # loop.run_until_complete() for telnet.  That must not run on HA's event
@@ -465,7 +473,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     source_objs = []
     zonesources = {}
     for source_name, source_input in sources.items():
-        sourceobj = XAPSource(hass, xapconn, source_name, source_input)
+        sourceobj = XAPSource(hass, xapconn, source_name, source_input,
+                              allow_trim=allow_trim)
         source_objs.append(sourceobj)
         zonesources[source_name] = sourceobj
 
@@ -485,12 +494,14 @@ class XAPSource(MediaPlayerEntity):
     Represents one source
     """
 
-    def __init__(self, hass, xapconn, source_name, source_inputs, unitCode=0):
+    def __init__(self, hass, xapconn, source_name, source_inputs, unitCode=0,
+                 allow_trim=False):
         """Initialise the XAPX00 source pseudo-device"""
         _LOGGER.debug("Setting Up Source %s" % source_name)
         self.hass = hass
         self._name = source_name
         self._xapx00 = xapconn
+        self._allow_trim = allow_trim
         self._state = STATE_OFF
         self.xunit = 0
         self.xinput = None
@@ -605,7 +616,7 @@ class XAPSource(MediaPlayerEntity):
     @property
     def supported_features(self):
         """Flag of media commands that are supported."""
-        return SUPPORT_XAP_SOURCE
+        return SUPPORT_XAP_SOURCE_WITH_TRIM if self._allow_trim else SUPPORT_XAP_SOURCE
 
     @property
     def volume_level(self):
@@ -631,13 +642,24 @@ class XAPSource(MediaPlayerEntity):
 
     @handle_xap_exceptions
     async def async_set_volume_level(self, volume):
-        """Set volume level, range 0..1."""
+        """Set volume level, range 0..1.
+
+        Every input is set from the *requested* level. This used to reassign the loop
+        variable from setPropGain's return, so the second input was set from the value
+        read back for the first - and since that return is a proportion of that
+        channel's own MAXGAIN, two inputs with different ceilings landed at different
+        dB. The level reported afterwards is the first input's readback, matching
+        _get_volume_level, which also reads _inputs[0].
+        """
+        landed = None
         for s in self._inputs:
-            volume = await self._xap(
+            result = await self._xap(
                 lambda s=s: self._xapx00.setPropGain(s['CHAN'], volume,
                                                      isAbsolute=1, group="I", unitCode=s['UNIT'])
             )
-        self._volume = volume
+            if landed is None:
+                landed = result
+        self._volume = volume if landed is None else landed
 
     @handle_xap_exceptions
     async def async_mute_volume(self, mute=2):

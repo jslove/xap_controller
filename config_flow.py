@@ -24,6 +24,7 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_TELNET_USERNAME = "telnet_username"
 CONF_TELNET_PASSWORD = "telnet_password"
+CONF_SOURCE_TRIM = "source_trim"
 
 XAP_TYPES = ["XAP800", "XAP400", "CP880", "CP880T", "CP880TA"]
 BAUD_RATES = [9600, 19200, 38400, 57600]
@@ -223,6 +224,7 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_SOURCES, default=SOURCES_EXAMPLE): str,
                 vol.Required(CONF_ZONES, default=ZONES_EXAMPLE): str,
+                vol.Optional(CONF_SOURCE_TRIM, default=False): bool,
             }
         )
 
@@ -393,6 +395,10 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(
                     CONF_ZONES, default=current.get(CONF_ZONES, ZONES_EXAMPLE)
                 ): str,
+                vol.Optional(
+                    CONF_SOURCE_TRIM,
+                    default=current.get(CONF_SOURCE_TRIM, False),
+                ): bool,
             }
         )
 
