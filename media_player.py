@@ -137,6 +137,11 @@ _LOGGER = logging.getLogger(__name__)
 
 SRC_OFF = 'Off'
 
+# Processing blocks, addressed by letter rather than number. A zone can be fed
+# input -> processing -> output, which leaves no direct input/output crosspoint for
+# the plain matrix lookup to find.
+PROC_BLOCKS = "ABCDEFGH"
+
 SUPPORT_XAP_ZONE = (
     MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
     MPEF.TURN_ON | MPEF.TURN_OFF |
@@ -478,6 +483,13 @@ class XAPZone(MediaPlayerEntity):
         self._active_source = SRC_OFF
         self._poweroff_source = SRC_OFF
         self._first_connect = 0
+        # Processing block this zone is fed through, if any. Looked up once - the
+        # scan costs one serial round trip per block and _get_source runs on a timer.
+        # Processing block feeding each output, keyed (unit, output) and resolved on
+        # first use. Per output, not per zone: the two halves of a stereo zone can be
+        # fed by different blocks, and caching one answer for the whole zone routes
+        # both halves into the first one.
+        self._via_block = {}
         channels = ",".join(str(o) for o in self._outputs)
         self._attr_unique_id = f"XAP-Zone-{self._xapx00.conn_id}-{channels}"
 
@@ -565,23 +577,67 @@ class XAPZone(MediaPlayerEntity):
         cnt = 0
         for xOut in self._outputs:
             XUNIT, XOUT = self.parse_output(xOut)
+            # Route into the processing block when the zone has one, not around it:
+            # setting the direct crosspoint would leave the processed path closed too
+            # and sum both feeds into the same output.
+            blk = await self._feeding_block(XOUT, XUNIT)
+            DEST, DESTGRP = (XOUT, "O") if blk is None else (blk, "P")
             if actsrc != SRC_OFF and actsrc != source:
                 XIN, XINGRP = self._sources[actsrc].getSource(XUNIT, cnt)
                 await self._xap(
-                    lambda XIN=XIN, XOUT=XOUT, XINGRP=XINGRP, XUNIT=XUNIT:
-                        self._xapx00.setMatrixRouting(XIN, XOUT, 0, inGroup=XINGRP, unitCode=XUNIT)
+                    lambda XIN=XIN, DEST=DEST, XINGRP=XINGRP, DESTGRP=DESTGRP, XUNIT=XUNIT:
+                        self._xapx00.setMatrixRouting(XIN, DEST, 0, inGroup=XINGRP,
+                                                     outGroup=DESTGRP, unitCode=XUNIT)
                 )
                 _LOGGER.debug('Turned off actsrc: {}'.format(actsrc))
             if source != SRC_OFF:
                 XIN, XINGRP = self._sources[source].getSource(XUNIT, cnt)
                 ON = 3 if (issubclass(type(XIN), int) and XIN <= (self._xapx00.matrixGeo-4)) else 1
                 await self._xap(
-                    lambda XIN=XIN, XOUT=XOUT, ON=ON, XINGRP=XINGRP, XUNIT=XUNIT:
-                        self._xapx00.setMatrixRouting(XIN, XOUT, ON, inGroup=XINGRP, unitCode=XUNIT)
+                    lambda XIN=XIN, DEST=DEST, ON=ON, XINGRP=XINGRP, DESTGRP=DESTGRP, XUNIT=XUNIT:
+                        self._xapx00.setMatrixRouting(XIN, DEST, ON, inGroup=XINGRP,
+                                                     outGroup=DESTGRP, unitCode=XUNIT)
                 )
                 self._poweroff_source = source
             cnt += 1
         self._active_source = source
+
+    @handle_xap_exceptions
+    async def _feeding_block(self, XOUT, XUNIT):
+        """The processing block feeding this zone's output, or None if wired direct.
+
+        Without this, a zone running input -> processing -> output reports no source at
+        all: the direct crosspoint really is 0, so `_get_source` falls through to
+        SRC_OFF, the entity goes to STATE_OFF, and Home Assistant greys out its volume
+        and mute. The audio is playing perfectly the whole time.
+        """
+        key = (XUNIT, XOUT)
+        if key in self._via_block:
+            return self._via_block[key]
+        found = None
+        for blk in PROC_BLOCKS:
+            # stereo=0 is required, not an optimisation: the @stereo decorator repeats
+            # the call with the channel argument incremented, which turns block "H"
+            # into "I" and earns an Argument error that would fail the whole zone. This
+            # is a probe of one channel, so the pairing is meaningless here anyway.
+            try:
+                state = await self._xap(
+                    lambda b=blk: self._xapx00.getMatrixRouting(
+                        b, XOUT, inGroup="P", outGroup="O", unitCode=XUNIT, stereo=0)
+                )
+            except (XAPCommError, XAPRespError):
+                # A block this unit will not answer for is simply not the one feeding
+                # us; never let probing take the zone offline.
+                _LOGGER.debug("block %s not probeable for %s", blk, self._name)
+                continue
+            if int(state) > 0:
+                found = blk
+                break
+        self._via_block[key] = found
+        if found:
+            _LOGGER.info("Zone %s output %s:%s is fed through processing block %s",
+                         self._name, XUNIT, XOUT, found)
+        return found
 
     async def _get_source(self):
         """Get first active source for outputs in this zone."""
@@ -589,13 +645,18 @@ class XAPZone(MediaPlayerEntity):
             return SRC_OFF
         _LOGGER.debug("In get_source for {}".format(self))
         _LOGGER.debug("  Checking: {}".format(self._sources))
+        XUNIT, XOUT = self.parse_output(self._outputs[0])
+        blk = await self._feeding_block(XOUT, XUNIT)
         for xIn in self._sources.values():
             if xIn != self._sources[SRC_OFF]:
-                XUNIT, XOUT = self.parse_output(self._outputs[0])
                 XIN, XINGRP = xIn.getSource(XUNIT)
+                # A zone behind a processing block is routed source -> block; the
+                # block -> output leg is static and set up outside this integration.
+                DEST, DESTGRP = (XOUT, "O") if blk is None else (blk, "P")
                 z_state = int(await self._xap(
-                    lambda XIN=XIN, XOUT=XOUT, XINGRP=XINGRP, XUNIT=XUNIT:
-                        self._xapx00.getMatrixRouting(XIN, XOUT, inGroup=XINGRP, unitCode=XUNIT)
+                    lambda XIN=XIN, DEST=DEST, XINGRP=XINGRP, DESTGRP=DESTGRP, XUNIT=XUNIT:
+                        self._xapx00.getMatrixRouting(XIN, DEST, inGroup=XINGRP,
+                                                      outGroup=DESTGRP, unitCode=XUNIT)
                 ))
                 _LOGGER.debug("matrix routing for {}={}".format(xIn, z_state))
                 if z_state > 0:
