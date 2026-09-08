@@ -336,6 +336,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
     conn_type = entry.data.get(CONF_CONNECTION_TYPE, "serial")
     xap_type  = entry.data.get(CONF_TYPE, "XAP800")
     stereo    = 1 if entry.data.get(CONF_STEREO, False) else 0
+    if stereo:
+        # Deprecated: overlaps the explicit multi-channel list and is unsafe combined
+        # with it -- a zone listed as [3, 4] with stereo on writes crosspoints 3&4 and
+        # then 4&5. See https://github.com/jslove/xap_controller/issues/23
+        _LOGGER.warning(
+            "The 'stereo' option is deprecated and will be removed in a future release. "
+            "List each channel explicitly instead: a zone of [3] with stereo on becomes "
+            "a zone of [3, 4] with stereo off. See issue #23."
+        )
 
     # XAPX00.__init__ calls test_connection() internally, which uses
     # loop.run_until_complete() for telnet.  That must not run on HA's event
