@@ -32,7 +32,7 @@ CONNECTION_TYPES = ["serial", "telnet"]
 
 SOURCES_EXAMPLE = '{"Home Audio": [9], "TV": ["1:11:O:E"]}'
 ZONES_EXAMPLE = '{"Kitchen": [3], "Office": ["2:1", "2:2"]}'
-MAX_GAIN_EXAMPLE = '{"7": -15, "8": -15}'
+MAX_GAIN_EXAMPLE = '{"7": -15, "8": -15, "1:1": -12}'
 
 # The XAP800 output gain range. MAXGAIN is the ceiling GAIN may be set to, and it is
 # what a 1.0 volume_level means: getPropGain/setPropGain express level as a ratio
@@ -42,11 +42,32 @@ MAX_GAIN_MIN_DB = -65.0
 MAX_GAIN_MAX_DB = 20.0
 
 
+def parse_channel_key(key) -> tuple:
+    """A max_gain key -> (unit, channel).
+
+    Accepts the same shapes the zone/source channel lists do: a bare channel meaning
+    unit 0, or "<unit>:<channel>". Raises ValueError on anything else, so callers can
+    turn that into whatever error suits them.
+    """
+    text = str(key).strip()
+    if ":" in text:
+        unit_text, _, chan_text = text.partition(":")
+    else:
+        unit_text, chan_text = "0", text
+    unit, channel = int(unit_text), int(chan_text)
+    if not 0 <= unit <= 7:
+        raise ValueError(f"unit {unit} out of range 0-7")
+    if channel < 1:
+        raise ValueError(f"channel {channel} must be 1 or greater")
+    return unit, channel
+
+
 def _validate_max_gain(json_str: str) -> dict:
     """Parse and validate the per-channel max-gain JSON. Returns the parsed dict.
 
-    Keys are output channel numbers, values a ceiling in dB. Blank means "leave the
-    unit alone", which is the old behaviour.
+    Keys are output channels, values a ceiling in dB. A key is either a bare channel on
+    unit 0 or "<unit>:<channel>", matching how zones and sources already address a
+    chained system. Blank means "leave the unit alone", which is the old behaviour.
     """
     if not json_str or not json_str.strip():
         return {}
@@ -56,13 +77,17 @@ def _validate_max_gain(json_str: str) -> dict:
         raise vol.Invalid("invalid_max_gain")
     if not isinstance(data, dict):
         raise vol.Invalid("invalid_max_gain")
+    seen = set()
     for key, val in data.items():
         try:
-            channel = int(key)
+            addr = parse_channel_key(key)
         except (TypeError, ValueError):
             raise vol.Invalid("invalid_max_gain")
-        if channel < 1:
+        if addr in seen:
+            # "7" and "0:7" are the same channel; two ceilings for it is a mistake
+            # worth catching here rather than letting the last one win at setup.
             raise vol.Invalid("invalid_max_gain")
+        seen.add(addr)
         if isinstance(val, bool) or not isinstance(val, (int, float)):
             raise vol.Invalid("invalid_max_gain")
         if not MAX_GAIN_MIN_DB <= float(val) <= MAX_GAIN_MAX_DB:

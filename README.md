@@ -162,6 +162,14 @@ output channel to a dB ceiling:
 {"1": -15, "2": -15, "3": -15, "4": -15, "5": -15, "6": -15, "7": -15, "8": -15}
 ```
 
+A key is a bare channel on unit 0, or `"unit:channel"` on a chained system - the same
+addressing zones and sources already use. Channels on a downstream unit need the
+qualified form, or only the master gets a ceiling and the rest keep the factory +20 dB:
+
+```json
+{"7": -15, "8": -15, "1:1": -12, "1:2": -12}
+```
+
 With a âˆ’15 dB ceiling, 100% means âˆ’15 dB, and a zone at âˆ’22.5 dB shows as about 42%.
 
 - Values must be between âˆ’65 and +20 dB; channels you leave out are not touched.

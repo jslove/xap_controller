@@ -135,7 +135,7 @@ from XAPX00 import __version__ as XAPVER, XAPX00, XAPCommError, XAPRespError
 from .config_flow import (
     CONF_PATH, CONF_SOURCES, CONF_ZONES, CONF_TYPE, CONF_STEREO, CONF_BAUD,
     CONF_CONNECTION_TYPE, CONF_HOST, CONF_PORT, CONF_TELNET_USERNAME, CONF_TELNET_PASSWORD,
-    CONF_MAX_GAIN,
+    CONF_MAX_GAIN, parse_channel_key,
 )
 
 DOMAIN = 'xap_controller'
@@ -413,6 +413,12 @@ async def _apply_max_gain(hass, xapconn, raw):
     """
     if not raw or not str(raw).strip():
         return
+    if not xapconn.connectionLive:
+        # Every channel would raise into the handler below and log a full traceback -
+        # eight of them for a disconnected unit, none of which say anything the warning
+        # from the caller has not already said.
+        _LOGGER.warning("Not connected; leaving MAXGAIN alone this setup")
+        return
     try:
         wanted = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
@@ -428,7 +434,7 @@ async def _apply_max_gain(hass, xapconn, raw):
 
     for channel, ceiling in wanted.items():
         try:
-            chan = int(channel)
+            unit, chan = parse_channel_key(channel)
             db = float(ceiling)
         except (TypeError, ValueError):
             _LOGGER.error("max_gain entry %r: %r is not a channel/dB pair", channel, ceiling)
@@ -439,9 +445,10 @@ async def _apply_max_gain(hass, xapconn, raw):
             # listed: without this, a stereo setup writes 1&2, 2&3 ... 8&9 â€” overlapping,
             # twice the serial traffic, and channel 9 which nobody configured.
             await hass.async_add_executor_job(
-                lambda c=chan, d=db: xapconn.setMaxGain(c, d, group="O", stereo=0)
+                lambda c=chan, d=db, u=unit: xapconn.setMaxGain(
+                    c, d, group="O", unitCode=u, stereo=0)
             )
-            _LOGGER.info("Set MAXGAIN on output %s to %s dB", chan, db)
+            _LOGGER.info("Set MAXGAIN on unit %s output %s to %s dB", unit, chan, db)
 
             # A new ceiling does NOT drag an existing GAIN down to it - the XAP leaves the
             # level exactly where it was, sitting above its own stated maximum. That is not
@@ -456,7 +463,8 @@ async def _apply_max_gain(hass, xapconn, raw):
             # Expressed in proportional gain because that is already the ratio to MAXGAIN:
             # above 1.0 is above the ceiling, and writing 1.0 lands exactly on it.
             prop = await hass.async_add_executor_job(
-                lambda c=chan: xapconn.getPropGain(c, group="O", stereo=0)
+                lambda c=chan, u=unit: xapconn.getPropGain(
+                    c, group="O", unitCode=u, stereo=0)
             )
             # Compared in dB against a tolerance, not as `prop > 1.0`. db2linear adds a
             # 1e-7 dB fudge before converting, so a channel sitting exactly ON its ceiling
@@ -466,16 +474,16 @@ async def _apply_max_gain(hass, xapconn, raw):
             over_db = 20.0 * math.log10(prop) if prop > 0 else 0.0
             if over_db > GAIN_CLAMP_TOLERANCE_DB:
                 landed = await hass.async_add_executor_job(
-                    lambda c=chan: xapconn.setPropGain(
-                        c, 1.0, isAbsolute=1, group="O", stereo=0)
+                    lambda c=chan, u=unit: xapconn.setPropGain(
+                        c, 1.0, isAbsolute=1, group="O", unitCode=u, stereo=0)
                 )
                 _LOGGER.warning(
-                    "Output %s sat %.2f dB above its new %s dB ceiling; pulled it down "
-                    "to the ceiling (readback %.4f of MAXGAIN)",
-                    chan, over_db, db, landed,
+                    "Unit %s output %s sat %.2f dB above its new %s dB ceiling; pulled it "
+                    "down to the ceiling (readback %.4f of MAXGAIN)",
+                    unit, chan, over_db, db, landed,
                 )
         except Exception:  # noqa: BLE001 - a bad channel must not abort the rest
-            _LOGGER.exception("Failed setting MAXGAIN on output %s", chan)
+            _LOGGER.exception("Failed setting MAXGAIN on unit %s output %s", unit, chan)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):

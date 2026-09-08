@@ -18,6 +18,8 @@ class FakeHass:
 class FakeXap:
     """props maps channel -> proportional gain reported after its ceiling is written."""
 
+    connectionLive = True
+
     def __init__(self, props=None, refuse=()):
         self.props = props or {}
         self.refuse = set(refuse)
@@ -27,14 +29,14 @@ class FakeXap:
     def setMaxGain(self, channel, gain, group="I", unitCode=0, stereo=1):
         if channel in self.refuse:
             raise RuntimeError(f"channel {channel} refused")
-        self.max_writes.append((channel, gain, group, stereo))
+        self.max_writes.append((channel, gain, group, stereo, unitCode))
         return gain
 
     def getPropGain(self, channel, group="I", unitCode=0, stereo=1):
         return self.props[channel]
 
     def setPropGain(self, channel, gain, isAbsolute=1, group="I", unitCode=0, stereo=1):
-        self.gain_writes.append((channel, gain, group, stereo))
+        self.gain_writes.append((channel, gain, group, stereo, unitCode))
         return 1.0
 
 
@@ -50,7 +52,37 @@ def channels(writes):
 
 def test_writes_every_configured_ceiling(component):
     xap = apply(component, {7: 1.0, 8: 1.0}, json.dumps({"7": -7.5, "8": -10}))
-    assert xap.max_writes == [(7, -7.5, "O", 0), (8, -10.0, "O", 0)]
+    assert xap.max_writes == [(7, -7.5, "O", 0, 0), (8, -10.0, "O", 0, 0)]
+
+
+def test_a_bare_key_means_unit_0(component):
+    xap = apply(component, {7: 1.0}, json.dumps({"7": -7.5}))
+    assert xap.max_writes[0][4] == 0
+
+
+def test_a_unit_qualified_key_addresses_that_unit(component):
+    """A chained system: without this only the master ever gets a ceiling."""
+    xap = apply(component, {1: 1.0}, json.dumps({"1:1": -12.5}))
+    assert xap.max_writes == [(1, -12.5, "O", 0, 1)]
+
+
+def test_the_clamp_addresses_the_same_unit_as_the_ceiling(component):
+    xap = apply(component, {1: 2.0}, json.dumps({"2:1": -12.5}))
+    assert xap.max_writes[0][4] == 2
+    assert xap.gain_writes[0][4] == 2
+
+
+def test_units_are_kept_apart(component):
+    xap = apply(component, {3: 1.0}, json.dumps({"3": -7.5, "1:3": -12.0}))
+    assert [(w[0], w[4]) for w in xap.max_writes] == [(3, 0), (3, 1)]
+
+
+def test_an_offline_unit_is_left_alone(component):
+    """Every channel would otherwise raise and log a full traceback."""
+    xap = FakeXap({7: 2.0})
+    xap.connectionLive = False
+    asyncio.run(component._apply_max_gain(FakeHass(), xap, json.dumps({"7": -7.5})))
+    assert xap.max_writes == [] and xap.gain_writes == []
 
 
 def test_ceilings_are_written_per_channel_not_per_stereo_pair(component):
@@ -116,3 +148,57 @@ def test_nothing_is_written_without_usable_config(component, config):
         pytest.fail("a non-dict config should be ignored, not crash")
     assert xap.max_writes == []
     assert xap.gain_writes == []
+
+
+# --- config-flow validation of the max_gain keys ------------------------------------
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"7": -15}',
+        '{"7": -15, "8": -10.5}',
+        '{"1:1": -12}',
+        '{"7": -15, "1:1": -12}',
+        '{"0:7": -15}',
+        '{"1": 20}',
+        '{"1": -65}',
+        "",
+        "   ",
+    ],
+)
+def test_valid_max_gain_is_accepted(config_flow, raw):
+    config_flow._validate_max_gain(raw)
+
+
+@pytest.mark.parametrize(
+    "raw,why",
+    [
+        ('{"7": -66}', "below the -65 dB floor"),
+        ('{"7": 21}', "above the +20 dB maximum"),
+        ('{"0": -15}', "channel numbers start at 1"),
+        ('{"8:1": -15}', "unit codes stop at 7"),
+        ('{"1:0": -15}', "channel numbers start at 1"),
+        ('{"1:2:3": -15}', "not a unit:channel pair"),
+        ('{"kitchen": -15}', "not a channel at all"),
+        ('{"7": -15, "0:7": -12}', "same channel twice"),
+        ('{"7": true}', "a bool is not a dB value"),
+        ('{"7": "-15"}', "a string is not a dB value"),
+        ('["7", -15]', "must be an object"),
+        ("{not json", "must be JSON"),
+    ],
+)
+def test_invalid_max_gain_is_rejected(config_flow, raw, why):
+    with pytest.raises(Exception):
+        config_flow._validate_max_gain(raw)
+
+
+@pytest.mark.parametrize(
+    "key,expected", [("7", (0, 7)), ("0:7", (0, 7)), ("1:1", (1, 1)), (7, (0, 7))]
+)
+def test_parse_channel_key(config_flow, key, expected):
+    assert config_flow.parse_channel_key(key) == expected
+
+
+def test_max_gain_bounds_match_the_documented_hardware_range(config_flow):
+    """MAX takes a Signed Float of -65.00 - 20.00 dB on XAP and Converge alike."""
+    assert (config_flow.MAX_GAIN_MIN_DB, config_flow.MAX_GAIN_MAX_DB) == (-65.0, 20.0)
