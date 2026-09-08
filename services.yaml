@@ -10,6 +10,7 @@ send_command:
       description: >-
         The command body only — the device address and terminator are added for you.
         Examples: "VER", "GAIN 7 O", "LABEL 7 O", "MTRX 9 I 7 O", "MAX 7 O".
+        An argument containing spaces must be quoted: LABEL 5 O "Living Room".
       required: true
       example: GAIN 7 O
       selector:
@@ -37,3 +38,12 @@ send_command:
           min: 0
           max: 64
           mode: box
+    entry_id:
+      name: Config entry
+      description: >-
+        Which XAP system to talk to, when more than one is configured as a separate
+        config entry. Leave empty with a single entry. Chained units are one entry —
+        use the Unit field for those, not this.
+      required: false
+      selector:
+        text:

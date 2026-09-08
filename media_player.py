@@ -117,6 +117,7 @@ media_player:
 import logging
 import functools
 import json
+import shlex
 import threading
 
 import voluptuous as vol
@@ -208,21 +209,51 @@ SEND_COMMAND_SCHEMA = vol.Schema(
         vol.Optional("return_count", default=16): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=64)
         ),
+        # Only needed with more than one XAP system configured as separate entries;
+        # with one entry the connection is unambiguous and this can be omitted.
+        vol.Optional("entry_id"): cv.string,
     }
 )
 
 
-def _register_send_command(hass, xapconn):
+def _connection_for(hass, entry_id=None):
+    """The XAPX00 connection a service call should use.
+
+    Resolved per call rather than captured at registration, so the service cannot end up
+    bound to a connection whose config entry has since been unloaded.
+    """
+    conns = hass.data.get(DOMAIN, {})
+    if not conns:
+        raise ServiceValidationError("No XAP connection is currently set up")
+    if entry_id is not None:
+        if entry_id not in conns:
+            raise ServiceValidationError(
+                f"No set-up XAP config entry with id {entry_id}; "
+                f"known ids: {', '.join(sorted(conns))}"
+            )
+        return conns[entry_id]
+    if len(conns) > 1:
+        # Guessing here would silently talk to whichever entry set up first. A chained
+        # system is one entry and reaches its other units via the `unit` field; several
+        # entries means several independent systems, and only the caller knows which.
+        raise ServiceValidationError(
+            "More than one XAP config entry is set up; pass entry_id. "
+            f"Known ids: {', '.join(sorted(conns))}"
+        )
+    return next(iter(conns.values()))
+
+
+def _register_send_command(hass):
     """Expose a raw command channel: `xap_controller.send_command`.
 
-    The point is hands-on work on the unit â€” reading LABEL/MTRX/MAX, trying settings the
-    entities do not model â€” without a second process opening the serial port behind this
+    The point is hands-on work on the unit — reading LABEL/MTRX/MAX, trying settings the
+    entities do not model — without a second process opening the serial port behind this
     integration's back. XAPCommand already owns the framing, the device address, the
     response parsing and the lock, so going through it is both safer and less code than a
     side channel.
 
-    Registered against the first config entry to set up; the `unit` field addresses other
-    XAPs on the expansion chain, which is the multi-unit case that actually exists.
+    The service is registered once and looks its connection up at call time; see
+    `async_release_connection` for the teardown side.
     """
     if hass.services.has_service(DOMAIN, SERVICE_SEND_COMMAND):
         return
@@ -231,8 +262,17 @@ def _register_send_command(hass, xapconn):
         raw = call.data["command"].strip()
         if not raw:
             raise ServiceValidationError("command is empty")
-        parts = raw.split()
+        try:
+            # shlex rather than str.split so a quoted argument survives: a label is a
+            # command argument that legitimately contains spaces, and
+            # `LABEL 5 O "Living Room"` is otherwise five tokens rather than three.
+            parts = shlex.split(raw)
+        except ValueError as err:
+            raise ServiceValidationError(f"could not parse command: {err}") from err
+        if not parts:
+            raise ServiceValidationError("command is empty")
         verb, args = parts[0], parts[1:]
+        xapconn = _connection_for(hass, call.data.get("entry_id"))
 
         def _run():
             with xapconn._lock:
@@ -245,7 +285,7 @@ def _register_send_command(hass, xapconn):
         try:
             result = await hass.async_add_executor_job(_run)
         except (XAPCommError, XAPRespError) as err:
-            # A refused command is a normal outcome when probing an unfamiliar unit â€”
+            # A refused command is a normal outcome when probing an unfamiliar unit —
             # report it as the answer rather than as an integration failure.
             return {"command": raw, "error": str(err) or err.__class__.__name__}
         if isinstance(result, (list, tuple)):
@@ -262,6 +302,21 @@ def _register_send_command(hass, xapconn):
         supports_response=SupportsResponse.OPTIONAL,
     )
     _LOGGER.info("Registered %s.%s", DOMAIN, SERVICE_SEND_COMMAND)
+
+
+def async_release_connection(hass, entry):
+    """Drop an unloaded entry's connection, and the service with the last one.
+
+    Without this the service outlives its connection: reloading or deleting the entry
+    left `send_command` registered against a dead XAPX00, and the has_service guard meant
+    no surviving entry could take it over, so it stayed broken until a full restart.
+    """
+    conns = hass.data.get(DOMAIN, {})
+    conns.pop(entry.entry_id, None)
+    if not conns and hass.services.has_service(DOMAIN, SERVICE_SEND_COMMAND):
+        hass.services.async_remove(DOMAIN, SERVICE_SEND_COMMAND)
+        _LOGGER.info("Removed %s.%s with the last config entry",
+                     DOMAIN, SERVICE_SEND_COMMAND)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -318,7 +373,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if not connected:
         _LOGGER.warning('Not connected to %s', conn_label)
 
-    _register_send_command(hass, xapconn)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = xapconn
+    _register_send_command(hass)
 
     source_objs = []
     zonesources = {}
