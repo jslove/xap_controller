@@ -485,8 +485,11 @@ class XAPZone(MediaPlayerEntity):
         self._first_connect = 0
         # Processing block this zone is fed through, if any. Looked up once - the
         # scan costs one serial round trip per block and _get_source runs on a timer.
-        self._via_block = None
-        self._via_block_checked = False
+        # Processing block feeding each output, keyed (unit, output) and resolved on
+        # first use. Per output, not per zone: the two halves of a stereo zone can be
+        # fed by different blocks, and caching one answer for the whole zone routes
+        # both halves into the first one.
+        self._via_block = {}
         channels = ",".join(str(o) for o in self._outputs)
         self._attr_unique_id = f"XAP-Zone-{self._xapx00.conn_id}-{channels}"
 
@@ -608,8 +611,10 @@ class XAPZone(MediaPlayerEntity):
         SRC_OFF, the entity goes to STATE_OFF, and Home Assistant greys out its volume
         and mute. The audio is playing perfectly the whole time.
         """
-        if self._via_block_checked:
-            return self._via_block
+        key = (XUNIT, XOUT)
+        if key in self._via_block:
+            return self._via_block[key]
+        found = None
         for blk in PROC_BLOCKS:
             # stereo=0 is required, not an optimisation: the @stereo decorator repeats
             # the call with the channel argument incremented, which turns block "H"
@@ -626,13 +631,13 @@ class XAPZone(MediaPlayerEntity):
                 _LOGGER.debug("block %s not probeable for %s", blk, self._name)
                 continue
             if int(state) > 0:
-                self._via_block = blk
+                found = blk
                 break
-        self._via_block_checked = True
-        if self._via_block:
-            _LOGGER.info("Zone %s is fed through processing block %s",
-                         self._name, self._via_block)
-        return self._via_block
+        self._via_block[key] = found
+        if found:
+            _LOGGER.info("Zone %s output %s:%s is fed through processing block %s",
+                         self._name, XUNIT, XOUT, found)
+        return found
 
     async def _get_source(self):
         """Get first active source for outputs in this zone."""
