@@ -910,14 +910,27 @@ class XAPZone(MediaPlayerEntity):
         """Blocking XAP call — run in executor."""
         if not self.connectionLive(): return
         _LOGGER.debug("set_volume_level: {}:{}".format(self, volume))
-        for output in self._outputs:
+        # `volume` is never reassigned in this loop. setPropGain returns the achieved
+        # proportion for the channel it just wrote, relative to THAT channel's MAXGAIN,
+        # so feeding it forward would set every output after the first from the previous
+        # channel's read-back instead of from what the caller asked for. Harmless while
+        # every channel shares one MAXGAIN and nothing clamps -- the round trip is a
+        # fixed point -- and wrong as soon as either stops being true.
+        reported = volume
+        for index, output in enumerate(self._outputs):
             XUNIT, XOUT = self.parse_output(output)
             _LOGGER.debug("Set Volume for output {} to {}".format(output, volume))
-            volume = await self._xap(
-                lambda XOUT=XOUT, XUNIT=XUNIT:
-                    self._xapx00.setPropGain(XOUT, volume, group="O", unitCode=XUNIT)
+            landed = await self._xap(
+                lambda XOUT=XOUT, XUNIT=XUNIT, v=volume:
+                    self._xapx00.setPropGain(XOUT, v, group="O", unitCode=XUNIT)
             )
-        self._volume = volume
+            if index == 0:
+                # Agree with _get_volume_level, which reads _outputs[0]. On a zone whose
+                # channels have different ceilings there is no single honest answer, so
+                # the getter and the setter reporting the same channel is the least
+                # surprising of the available wrong answers.
+                reported = landed
+        self._volume = reported
 
     @handle_xap_exceptions
     async def _get_volume_level(self):
