@@ -97,3 +97,28 @@ media_player:
 
 Setup Notes:
 For the sources, set the gain levels in the Clearone Console app.  They are very sensitive and should be calibrated to 0db.  I have removed the ability to change the source gain levels from the UI to prevent mis-configuation.  It can be added back through the source gode by adding MPEF.VOLUME_SET to the SOURCE capability list (if you need it, for example if you don't have the Console app available).
+
+## Raw command access (`xap_controller.send_command`)
+
+For hands-on work on the unit â€” reading `LABEL`, `MTRX`, `MAX`, or trying anything the
+entities do not model â€” call the service rather than opening the serial port from another
+process. `XAPCommand` owns the device address, the terminator, the response parsing and
+the lock, so going through it cannot collide with the entities mid-frame.
+
+```yaml
+action: xap_controller.send_command
+data:
+  command: GAIN 7 O
+response_variable: reply
+```
+
+Returns `{"command": "GAIN 7 O", "response": ["GAIN 7 O -33.00 A", ...]}`. Pass only the
+command body; the `#5<unit>` prefix and the `\r` terminator are added for you.
+
+- `unit` (default 0) addresses other XAPs on the expansion chain.
+- `return_count` (default 16) is how many trailing tokens of the reply to keep. It is a
+  tail, not a limit, so too small a value silently drops the front of the answer â€” at 2,
+  `LABEL 5 O` comes back as `- Patio` with the `3L` missing. The default is past the
+  longest reply seen; asking for more tokens than arrive just returns what arrived.
+- A command the unit refuses comes back as `{"command": ..., "error": ...}` rather than
+  raising, because a rejection is a normal result when probing an unfamiliar unit.

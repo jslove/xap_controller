@@ -1,0 +1,49 @@
+send_command:
+  name: Send raw command
+  description: >-
+    Send a raw ClearOne command to the XAP and return its reply. Goes through the
+    integration's own connection and lock, so it cannot collide with the entities the way
+    a second process opening the serial port would.
+  fields:
+    command:
+      name: Command
+      description: >-
+        The command body only — the device address and terminator are added for you.
+        Examples: "VER", "GAIN 7 O", "LABEL 7 O", "MTRX 9 I 7 O", "MAX 7 O".
+        An argument containing spaces must be quoted: LABEL 5 O "Living Room".
+      required: true
+      example: GAIN 7 O
+      selector:
+        text:
+    unit:
+      name: Unit
+      description: XAP unit code on the expansion chain. 0 unless you have more than one.
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 7
+          mode: box
+    return_count:
+      name: Return elements
+      description: >-
+        How many trailing tokens of the reply to keep. The default of 16 is past the
+        longest reply seen, so you get the whole line; lower it only if you want just the
+        value. At 2, "LABEL 5 O" returns just "- Patio" and drops the "3L".
+      required: false
+      default: 16
+      selector:
+        number:
+          min: 0
+          max: 64
+          mode: box
+    entry_id:
+      name: Config entry
+      description: >-
+        Which XAP system to talk to, when more than one is configured as a separate
+        config entry. Leave empty with a single entry. Chained units are one entry —
+        use the Unit field for those, not this.
+      required: false
+      selector:
+        text:
