@@ -324,6 +324,73 @@ def async_release_connection(hass, entry):
                      DOMAIN, SERVICE_SEND_COMMAND)
 
 
+async def _prewarm_max_gain(hass, xapconn, zones):
+    """Read every zone output channel's MAXGAIN once, to seed XAPX00's cache.
+
+    setPropGain needs a channel's MAXGAIN to turn a 0-1 level into dB, and XAPX00 caches
+    it (2026.09.03 onward) so that read happens once per channel per process rather than
+    on every volume write. The question this function answers is *when* that one read
+    happens, because the miss lands on whichever call touches the channel first.
+
+    For a zone that is ON at startup, _firstConnect reaches _sync_volume_level, which
+    writes every output channel and warms them all. For a zone that is OFF it does not:
+    _sync_volume_level returns early on SRC_OFF, so only outputs[0] gets read by
+    _get_volume_level and every other channel in that zone stays cold. The first real
+    volume change then pays an extra round trip per channel - ~83 ms each over telnet,
+    on a multi-channel zone, at exactly the moment someone is moving a slider.
+
+    On a system whose zones are mostly off between uses that is the common case, so the
+    reads are done here instead, where nothing is waiting on them.
+
+    Best effort throughout: a channel that will not answer is simply left out of the
+    cache and picked up by the normal path later. Nothing here is worth failing setup
+    over, and none of it changes a single setting on the unit - these are queries.
+    """
+    if not xapconn.connectionLive:
+        _LOGGER.debug("Not connected; skipping MAXGAIN pre-warm")
+        return
+
+    channels = []
+    seen = set()
+    for zone in zones:
+        for output in zone._outputs:
+            try:
+                addr = zone.parse_output(output)
+            except Exception:
+                # parse_output raises a bare Exception on a malformed spec. The zone
+                # itself reports that where it matters; duplicating the complaint from a
+                # cache warmer would just be noise.
+                continue
+            if addr not in seen:
+                seen.add(addr)
+                channels.append(addr)
+
+    if not channels:
+        return
+
+    def _read_all():
+        # One acquisition for the whole batch rather than per channel: this runs before
+        # async_add_entities, so nothing else is using the connection yet, and it keeps
+        # ~24 queries from interleaving with anything that starts mid-way.
+        with xapconn._lock:
+            cached = 0
+            for unit, chan in channels:
+                try:
+                    # stereo=0: getMaxGain is @stereo decorated, and letting it run would
+                    # read chan+1 as well - double the traffic, and it caches channels
+                    # nobody listed (a zone of [3, 4] would also fetch 4 and 5).
+                    xapconn.getMaxGain(chan, group="O", unitCode=unit, stereo=0)
+                    cached += 1
+                except Exception:
+                    _LOGGER.debug(
+                        "MAXGAIN pre-warm: unit %s output %s did not answer", unit, chan)
+            return cached
+
+    cached = await hass.async_add_executor_job(_read_all)
+    _LOGGER.debug(
+        "MAXGAIN pre-warm: cached %s of %s zone output channels", cached, len(channels))
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up XAP Controller media player entities from a config entry."""
     sources = json.loads(entry.data[CONF_SOURCES])
@@ -402,6 +469,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     zone_objs = []
     for zone_name, outputs in zones.items():
         zone_objs.append(XAPZone(hass, xapconn, zonesources, zone_name, outputs))
+
+    await _prewarm_max_gain(hass, xapconn, zone_objs)
 
     async_add_entities(source_objs + zone_objs)
 
