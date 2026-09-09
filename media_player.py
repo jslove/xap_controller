@@ -117,6 +117,7 @@ media_player:
 import logging
 import functools
 import json
+import math
 import shlex
 import threading
 
@@ -135,6 +136,7 @@ from .config_flow import (
     CONF_PATH, CONF_SOURCES, CONF_ZONES, CONF_TYPE, CONF_STEREO, CONF_BAUD,
     CONF_CONNECTION_TYPE, CONF_HOST, CONF_PORT, CONF_TELNET_USERNAME, CONF_TELNET_PASSWORD,
     CONF_SOURCE_TRIM,
+    CONF_MAX_GAIN, parse_channel_key,
 )
 
 DOMAIN = 'xap_controller'
@@ -147,6 +149,10 @@ SRC_OFF = 'Off'
 # input -> processing -> output, which leaves no direct input/output crosspoint for
 # the plain matrix lookup to find.
 PROC_BLOCKS = "ABCDEFGH"
+# How far above its ceiling a channel must sit before _apply_max_gain pulls it down.
+# The unit reports gain to 0.01 dB; this is well under that, and far above the
+# rounding in db2linear that makes an exactly-at-ceiling channel read as just over 1.0.
+GAIN_CLAMP_TOLERANCE_DB = 0.005
 
 SUPPORT_XAP_ZONE = (
     MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
@@ -401,6 +407,125 @@ async def _prewarm_max_gain(hass, xapconn, zones):
     cached = await hass.async_add_executor_job(_read_all)
     _LOGGER.debug(
         "MAXGAIN pre-warm: cached %s of %s zone output channels", cached, len(channels))
+async def _apply_max_gain(hass, xapconn, raw):
+    """Write the configured per-channel MAXGAIN ceilings to the unit.
+
+    MAXGAIN is a safety limit in the hardware â€” GAIN cannot be set above it â€” and it is
+    also the reference a 1.0 volume_level maps to. Both reasons to configure it: an
+    unconfigured unit sits at the +20 dB factory maximum, so a full-scale slider is a
+    speaker-damaging level AND every realistic listening level crowds into the bottom
+    couple of percent of the slider.
+
+    Applied on every setup rather than once, so the ceiling is restored after anyone
+    edits it in G-Ware or from the front panel. Channels left out of the config are not
+    touched â€” including by the clamp below.
+
+    Each listed channel is then clamped to its ceiling, because lowering MAXGAIN does not
+    move a GAIN that is already above it. See the comment in the loop for what that cost.
+    """
+    if not raw or not str(raw).strip():
+        return
+    if not xapconn.connectionLive:
+        # Every channel would raise into the handler below and log a full traceback -
+        # eight of them for a disconnected unit, none of which say anything the warning
+        # from the caller has not already said.
+        _LOGGER.warning("Not connected; leaving MAXGAIN alone this setup")
+        return
+    try:
+        wanted = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        _LOGGER.error("max_gain is not valid JSON, ignoring it: %r", raw)
+        return
+    if not isinstance(wanted, dict):
+        # Valid JSON is not necessarily the right shape: a list parses cleanly and then
+        # dies on .items(), taking setup down with it. config_flow rejects this, but the
+        # stored entry can predate that validation or be edited by hand.
+        _LOGGER.error(
+            "max_gain must be a JSON object of channel -> dB, ignoring it: %r", raw)
+        return
+
+    for channel, ceiling in wanted.items():
+        try:
+            unit, chan = parse_channel_key(channel)
+            db = float(ceiling)
+        except (TypeError, ValueError):
+            _LOGGER.error("max_gain entry %r: %r is not a channel/dB pair", channel, ceiling)
+            continue
+        try:
+            # Read before writing. getPropGain costs the same two round trips either way,
+            # and it seeds XAPX00's MAXGAIN cache with the ceiling the unit is CURRENTLY
+            # holding - so the getMaxGain below is free, an unchanged ceiling is not
+            # rewritten on every restart, and the old value is available to say which of
+            # two very different situations this is.
+            #
+            # stereo=0 on all of these suppresses the @stereo decorator's "call again with
+            # channel+1". max_gain is declared per channel, so it must touch exactly the
+            # channels listed: without it a stereo connection walks 1&2, 2&3 ... 8&9 -
+            # overlapping, twice the traffic, and channel 9 which nobody configured.
+            prop = await hass.async_add_executor_job(
+                lambda c=chan, u=unit: xapconn.getPropGain(
+                    c, group="O", unitCode=u, stereo=0)
+            )
+            current = float(await hass.async_add_executor_job(
+                lambda c=chan, u=unit: xapconn.getMaxGain(
+                    c, group="O", unitCode=u, stereo=0)
+            ))
+
+            # prop is the level as a ratio of the ceiling it was just read against, so
+            # this is the channel's absolute gain regardless of what we do to the ceiling.
+            gain_db = current + 20.0 * math.log10(prop) if prop > 0 else None
+
+            ceiling_moved = abs(current - db) > GAIN_CLAMP_TOLERANCE_DB
+            if ceiling_moved:
+                await hass.async_add_executor_job(
+                    lambda c=chan, d=db, u=unit: xapconn.setMaxGain(
+                        c, d, group="O", unitCode=u, stereo=0)
+                )
+                _LOGGER.warning(
+                    "Unit %s output %s: MAXGAIN was %.2f dB, configured %.2f dB; set it. "
+                    "Either the option changed or something outside Home Assistant moved "
+                    "the ceiling.", unit, chan, current, db)
+            else:
+                _LOGGER.debug("Unit %s output %s already at its %.2f dB ceiling",
+                              unit, chan, db)
+
+            # A ceiling does NOT drag an existing GAIN down to it - the unit leaves the
+            # level exactly where it was, above its own stated maximum. That is not
+            # theoretical: on 2026-09-06 a reload wrote eight ceilings to -15.00 underneath
+            # outputs running between -7.50 and -13.34, so every zone reported volume_level
+            # greater than 1.0 - one came back 2.371, a slider at 237% - and each slider
+            # move wrote dB against a ceiling those levels were never chosen for.
+            #
+            # Nothing in the hardware prevents that: the 880 reference documents no
+            # interaction between GAIN and MAX, and GAIN's only stated limit is the -65..20
+            # internal range. So this clamp is the enforcement, not a second opinion on an
+            # enforcement the box already does.
+            #
+            # Compared in dB against a tolerance rather than as `prop > 1.0`, because
+            # db2linear does not return a clean 1.0 for a channel sitting exactly on its
+            # ceiling - 1.0000000115 on XAPX00 2026.04.22, 0.999999 on 2026.09.03. A bare
+            # `> 1.0` would clamp every channel on every startup on the older build.
+            over_db = None if gain_db is None else gain_db - db
+            if over_db is not None and over_db > GAIN_CLAMP_TOLERANCE_DB:
+                landed = await hass.async_add_executor_job(
+                    lambda c=chan, u=unit: xapconn.setPropGain(
+                        c, 1.0, isAbsolute=1, group="O", unitCode=u, stereo=0)
+                )
+                if ceiling_moved:
+                    _LOGGER.warning(
+                        "Unit %s output %s was %.2f dB, above the %.2f dB ceiling just "
+                        "set; pulled it down to the ceiling (readback %.4f of MAXGAIN)",
+                        unit, chan, gain_db, db, landed)
+                else:
+                    # The ceiling is what it has always been, so nothing here put the gain
+                    # above it. G-Ware, the front panel or a raw send_command did.
+                    _LOGGER.error(
+                        "Unit %s output %s was %.2f dB, above its unchanged %.2f dB "
+                        "ceiling - something outside this integration set it. Pulled it "
+                        "down to the ceiling (readback %.4f of MAXGAIN)",
+                        unit, chan, gain_db, db, landed)
+        except Exception:  # noqa: BLE001 - a bad channel must not abort the rest
+            _LOGGER.exception("Failed setting MAXGAIN on unit %s output %s", unit, chan)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -469,6 +594,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = xapconn
     _register_send_command(hass)
+    await _apply_max_gain(hass, xapconn, entry.data.get(CONF_MAX_GAIN, ""))
 
     source_objs = []
     zonesources = {}

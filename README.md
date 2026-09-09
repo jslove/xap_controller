@@ -138,3 +138,79 @@ command body; the `#5<unit>` prefix and the `\r` terminator are added for you.
   longest reply seen; asking for more tokens than arrive just returns what arrived.
 - A command the unit refuses comes back as `{"command": ..., "error": ...}` rather than
   raising, because a rejection is a normal result when probing an unfamiliar unit.
+## Max gain per output channel (safety ceiling)
+
+`MAXGAIN` is a per-channel ceiling in the XAP hardware: `GAIN` cannot be set above it.
+It is *also* the reference that Home Assistant's `volume_level` is measured against â€”
+`getPropGain`/`setPropGain` express level as a ratio of it, so `volume_level: 1.0`
+means "this channel's MAXGAIN".
+
+An unconfigured unit leaves MAXGAIN at the **+20 dB factory maximum** on every channel,
+which is bad twice over:
+
+- **Safety.** A slider dragged to 100% drives the output at +20 dB. On ceiling speakers
+  that is not a volume anyone intended.
+- **Usability.** Real listening levels are far below that, so they crowd into the very
+  bottom of the slider. On the unit this was written against, four zones sitting between
+  âˆ’22.5 and âˆ’33 dB all landed under **1%** â€” the whole useful range inside two pixels of
+  travel.
+
+Set the optional **Max gain** field on the Sources & Zones step to a JSON object mapping
+output channel to a dB ceiling:
+
+```json
+{"1": -15, "2": -15, "3": -15, "4": -15, "5": -15, "6": -15, "7": -15, "8": -15}
+```
+
+A key is a bare channel on unit 0, or `"unit:channel"` on a chained system - the same
+addressing zones and sources already use. Channels on a downstream unit need the
+qualified form, or only the master gets a ceiling and the rest keep the factory +20 dB:
+
+```json
+{"7": -15, "8": -15, "1:1": -12, "1:2": -12}
+```
+
+With a âˆ’15 dB ceiling, 100% means âˆ’15 dB, and a zone at âˆ’22.5 dB shows as about 42%.
+
+- Values must be between âˆ’65 and +20 dB; channels you leave out are not touched.
+- Leave the field blank to keep the old behaviour and not write MAXGAIN at all.
+- The ceilings are re-applied on every setup, so a change made in G-Ware or from the
+  front panel is restored the next time Home Assistant starts.
+- **Lowering a ceiling pulls that channel's GAIN down to it â€” but the integration does
+  that, not the hardware.** The XAP leaves an existing level exactly where it was, above
+  its own stated maximum. On 2026-09-06 a reload wrote all eight ceilings to âˆ’15.00 while
+  the outputs stayed between âˆ’7.50 and âˆ’13.34; `volume_level` is a ratio against MAXGAIN,
+  so those zones reported values greater than 1.0 â€” `zone_kitchen_dining` read **2.371**, a
+  slider at 237% â€” and every slider move wrote dB against a ceiling the levels had never
+  been chosen for. `_apply_max_gain` now reads each listed channel back after writing its
+  ceiling and clamps anything above it, which is why a configured channel cannot report
+  more than 1.0. The clamp only ever reduces a level, never raises one. A channel you left
+  out of the config is not clamped, and can still read above 1.0.
+
+### MAXGAIN is a reference, not a hardware limiter
+
+Worth being explicit, because the name suggests otherwise. The 880 command reference
+documents no interaction between `GAIN` and `MAX`: `GAIN`'s only stated limit is that
+*"absolute values will be limited to the internal gain range"* - that is -65...20 dB, not
+MAXGAIN - and `MAX`'s own range is that same -65...20, which is not what a real limiter
+would need. The 2.371 reading above is the positive evidence: a channel really can sit
+above its own stated maximum.
+
+So MAXGAIN is a stored reference that *software* gives meaning to, and the clamp above is
+the only enforcement that exists on the serial path - not a second opinion on something
+the box already guarantees.
+
+What that does and does not cover:
+
+- Anything routed through this integration is genuinely protected, because `setPropGain`
+  cannot express a value above `1.0`, which *is* MAXGAIN.
+- Anything that bypasses it - G-Ware, the front panel, `xap_controller.send_command` - is
+  not protected at all. That is the case the clamp reports as an error on the next setup.
+
+### Choosing a ceiling on a channel with reserved headroom
+
+On a channel driven programmatically with headroom deliberately left below the ceiling,
+MAXGAIN *is* that headroom: lowering it costs boost range one dB for one dB. Setting
+`-15` on such a channel is not free, so pick the ceiling from the loudest level that
+channel should ever reach, not from what it happens to sit at today.
+

@@ -25,6 +25,7 @@ CONF_PORT = "port"
 CONF_TELNET_USERNAME = "telnet_username"
 CONF_TELNET_PASSWORD = "telnet_password"
 CONF_SOURCE_TRIM = "source_trim"
+CONF_MAX_GAIN = "max_gain"
 
 XAP_TYPES = ["XAP800", "XAP400", "CP880", "CP880T", "CP880TA"]
 BAUD_RATES = [9600, 19200, 38400, 57600]
@@ -32,6 +33,67 @@ CONNECTION_TYPES = ["serial", "telnet"]
 
 SOURCES_EXAMPLE = '{"Home Audio": [9], "TV": ["1:11:O:E"]}'
 ZONES_EXAMPLE = '{"Kitchen": [3], "Office": ["2:1", "2:2"]}'
+MAX_GAIN_EXAMPLE = '{"7": -15, "8": -15, "1:1": -12}'
+
+# The XAP800 output gain range. MAXGAIN is the ceiling GAIN may be set to, and it is
+# what a 1.0 volume_level means: getPropGain/setPropGain express level as a ratio
+# against it, so leaving it at the +20 factory default squeezes every realistic
+# listening level into the bottom 2% of a Home Assistant slider.
+MAX_GAIN_MIN_DB = -65.0
+MAX_GAIN_MAX_DB = 20.0
+
+
+def parse_channel_key(key) -> tuple:
+    """A max_gain key -> (unit, channel).
+
+    Accepts the same shapes the zone/source channel lists do: a bare channel meaning
+    unit 0, or "<unit>:<channel>". Raises ValueError on anything else, so callers can
+    turn that into whatever error suits them.
+    """
+    text = str(key).strip()
+    if ":" in text:
+        unit_text, _, chan_text = text.partition(":")
+    else:
+        unit_text, chan_text = "0", text
+    unit, channel = int(unit_text), int(chan_text)
+    if not 0 <= unit <= 7:
+        raise ValueError(f"unit {unit} out of range 0-7")
+    if channel < 1:
+        raise ValueError(f"channel {channel} must be 1 or greater")
+    return unit, channel
+
+
+def _validate_max_gain(json_str: str) -> dict:
+    """Parse and validate the per-channel max-gain JSON. Returns the parsed dict.
+
+    Keys are output channels, values a ceiling in dB. A key is either a bare channel on
+    unit 0 or "<unit>:<channel>", matching how zones and sources already address a
+    chained system. Blank means "leave the unit alone", which is the old behaviour.
+    """
+    if not json_str or not json_str.strip():
+        return {}
+    try:
+        data = json.loads(json_str)
+    except json.JSONDecodeError:
+        raise vol.Invalid("invalid_max_gain")
+    if not isinstance(data, dict):
+        raise vol.Invalid("invalid_max_gain")
+    seen = set()
+    for key, val in data.items():
+        try:
+            addr = parse_channel_key(key)
+        except (TypeError, ValueError):
+            raise vol.Invalid("invalid_max_gain")
+        if addr in seen:
+            # "7" and "0:7" are the same channel; two ceilings for it is a mistake
+            # worth catching here rather than letting the last one win at setup.
+            raise vol.Invalid("invalid_max_gain")
+        seen.add(addr)
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            raise vol.Invalid("invalid_max_gain")
+        if not MAX_GAIN_MIN_DB <= float(val) <= MAX_GAIN_MAX_DB:
+            raise vol.Invalid("invalid_max_gain")
+    return data
 
 
 # How many colon-separated components a channel spec may carry. A zone output is
@@ -245,6 +307,11 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except vol.Invalid:
                 errors[CONF_ZONES] = "invalid_zones"
 
+            try:
+                _validate_max_gain(user_input.get(CONF_MAX_GAIN, ""))
+            except vol.Invalid:
+                errors[CONF_MAX_GAIN] = "invalid_max_gain"
+
             if not errors:
                 data = {**self._connection_data, **user_input}
                 title = self._connection_data.get(
@@ -263,6 +330,7 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SOURCES, default=SOURCES_EXAMPLE): str,
                 vol.Required(CONF_ZONES, default=ZONES_EXAMPLE): str,
                 vol.Optional(CONF_SOURCE_TRIM, default=False): bool,
+                vol.Optional(CONF_MAX_GAIN, default=""): str,
             }
         )
 
@@ -421,6 +489,11 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
             except vol.Invalid:
                 errors[CONF_ZONES] = "invalid_zones"
 
+            try:
+                _validate_max_gain(user_input.get(CONF_MAX_GAIN, ""))
+            except vol.Invalid:
+                errors[CONF_MAX_GAIN] = "invalid_max_gain"
+
             if not errors:
                 new_data = {**self._entry.data, **self._connection_data, **user_input}
                 self.hass.config_entries.async_update_entry(self._entry, data=new_data)
@@ -438,6 +511,9 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
                     CONF_SOURCE_TRIM,
                     default=current.get(CONF_SOURCE_TRIM, False),
                 ): bool,
+                vol.Optional(
+                    CONF_MAX_GAIN, default=current.get(CONF_MAX_GAIN, "")
+                ): str,
             }
         )
 
