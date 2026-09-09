@@ -85,3 +85,69 @@ def test_valid_sources_zones_accepted(config_flow, raw):
 def test_invalid_sources_zones_rejected(config_flow, raw):
     with pytest.raises(Exception):
         config_flow._validate_sources_zones(raw, "zones")
+
+
+# --- malformed specs: caught at config time, and survivable at parse time -----------
+
+@pytest.mark.parametrize(
+    "spec,why",
+    [
+        ("1:2:3", "a zone output is unit:channel, nothing longer"),
+        ("1:2:3:4:5", "longer than any documented form"),
+        ("a:2", "unit is not a number"),
+        ("1:b", "channel is not a number"),
+        ("kitchen", "not a channel at all"),
+        ("", "empty"),
+        ("   ", "blank"),
+        (1.5, "not an int or a string"),
+        (True, "a bool is not a channel"),
+    ],
+)
+def test_malformed_zone_specs_are_rejected_at_config_time(config_flow, spec, why):
+    with pytest.raises(Exception):
+        config_flow._validate_channel_spec(spec, "zones")
+
+
+@pytest.mark.parametrize("spec", [3, "3", "1:3"])
+def test_valid_zone_specs_are_accepted(config_flow, spec):
+    config_flow._validate_channel_spec(spec, "zones")
+
+
+@pytest.mark.parametrize("spec", [9, "9", "1:9", "1:9:O", "1:9:O:E"])
+def test_valid_source_specs_are_accepted(config_flow, spec):
+    """A source may name an expansion bus and its group; a zone output may not."""
+    config_flow._validate_channel_spec(spec, "sources")
+
+
+def test_a_source_bus_spec_is_not_valid_for_a_zone(config_flow):
+    config_flow._validate_channel_spec("1:9:O:E", "sources")
+    with pytest.raises(Exception):
+        config_flow._validate_channel_spec("1:9:O:E", "zones")
+
+
+@pytest.mark.parametrize("spec", ["1:2:3:4:5", "1:9::E"])
+def test_malformed_source_specs_are_rejected_at_config_time(config_flow, spec):
+    with pytest.raises(Exception):
+        config_flow._validate_channel_spec(spec, "sources")
+
+
+def test_the_validator_rejects_a_bad_spec_inside_a_zone_list(config_flow):
+    with pytest.raises(Exception):
+        config_flow._validate_sources_zones('{"Kitchen": [3, "1:2:3"]}', "zones")
+
+
+@pytest.mark.parametrize("spec", ["1:2:3", "a:2", "1:b"])
+def test_parse_output_raises_its_own_error_on_a_bad_spec(component, spec):
+    """Not ValueError from an unpack - these reach setup if validation is bypassed."""
+    zone = make_zone(component, [1])
+    with pytest.raises(Exception) as err:
+        zone.parse_output(spec)
+    assert "Invalid Output" in str(err.value)
+
+
+@pytest.mark.parametrize("spec", ["1:2:3:4:5", "a:2", "1:b"])
+def test_parse_source_raises_its_own_error_on_a_bad_spec(component, spec):
+    """"1:2:3:4:5" matched no comps branch and died on int(None)."""
+    with pytest.raises(Exception) as err:
+        make_source(component, [spec])
+    assert "Invalid Input String" in str(err.value)
