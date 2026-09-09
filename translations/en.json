@@ -33,7 +33,8 @@
         "description": "Enter sources and zones as JSON objects. Keys are names, values are lists of channel specs (integers or strings like \"1:3\" or \"1:9:O:E\").",
         "data": {
           "sources": "Sources (JSON)",
-          "zones": "Zones (JSON)"
+          "zones": "Zones (JSON)",
+          "source_trim": "Allow source input gain to be set from the UI"
         }
       }
     },
@@ -80,7 +81,8 @@
         "description": "Enter sources and zones as JSON objects. Keys are names, values are lists of channel specs (integers or strings like \"1:3\" or \"1:9:O:E\").",
         "data": {
           "sources": "Sources (JSON)",
-          "zones": "Zones (JSON)"
+          "zones": "Zones (JSON)",
+          "source_trim": "Allow source input gain to be set from the UI"
         }
       }
     },
