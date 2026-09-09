@@ -33,6 +33,45 @@ SOURCES_EXAMPLE = '{"Home Audio": [9], "TV": ["1:11:O:E"]}'
 ZONES_EXAMPLE = '{"Kitchen": [3], "Office": ["2:1", "2:2"]}'
 
 
+# How many colon-separated components a channel spec may carry. A zone output is
+# "<unit>:<channel>"; a source may also name an expansion bus and its group,
+# "<unit>:<channel>:<bus>:<busgroup>".
+_MAX_SPEC_PARTS = {"zones": 2, "sources": 4}
+
+
+def _validate_channel_spec(spec, label: str) -> None:
+    """Reject a channel spec the parsers cannot make sense of.
+
+    Checking only the item type let malformed specs through to setup, where they surfaced
+    as a crash rather than as a config error: "1:2:3" reached parse_output and raised
+    ValueError unpacking three parts into two, and "1:2:3:4:5" reached parse_source,
+    matched none of its comps branches, and hit int(None).
+
+    Deliberately loose about the expansion-bus fields - only the component count and the
+    numeric parts are checked - so that a working configuration using a bus letter or
+    group this does not know about is not locked out at the config screen.
+    """
+    if isinstance(spec, bool) or not isinstance(spec, (int, str)):
+        raise vol.Invalid(f"invalid_{label}")
+    if isinstance(spec, int):
+        return
+    text = spec.strip()
+    if not text:
+        raise vol.Invalid(f"invalid_{label}")
+    parts = text.split(":")
+    if len(parts) > _MAX_SPEC_PARTS.get(label, 4):
+        raise vol.Invalid(f"invalid_{label}")
+    if len(parts) == 1:
+        if not text.isdigit():
+            raise vol.Invalid(f"invalid_{label}")
+        return
+    unit, channel = parts[0].strip(), parts[1].strip()
+    if not unit.isdigit() or not channel.isdigit():
+        raise vol.Invalid(f"invalid_{label}")
+    if any(not part.strip() for part in parts[2:]):
+        raise vol.Invalid(f"invalid_{label}")
+
+
 def _validate_sources_zones(json_str: str, label: str) -> dict:
     """Parse and validate a JSON sources/zones string. Returns the parsed dict."""
     try:
@@ -47,8 +86,7 @@ def _validate_sources_zones(json_str: str, label: str) -> dict:
         if not isinstance(val, list):
             raise vol.Invalid(f"invalid_{label}")
         for item in val:
-            if not isinstance(item, (int, str)):
-                raise vol.Invalid(f"invalid_{label}")
+            _validate_channel_spec(item, label)
     return data
 
 
@@ -311,6 +349,7 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
                 if not connected:
                     errors["base"] = "cannot_connect"
             except Exception:
+                _LOGGER.exception("XAP connection test failed")
                 errors["base"] = "cannot_connect"
 
             if not errors:

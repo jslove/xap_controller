@@ -561,12 +561,19 @@ class XAPSource(MediaPlayerEntity):
                     if comps == 1:
                         inpdict['UNIT'], inpdict['CHAN']  =  src.split(":")
                     elif comps == 2:
+                        # BUSGRP already defaults to 'E' in inpdict above.
                         inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'] = src.split(":")
-                        XBUSGRP = 'E' # default to E
                     elif comps == 3:
                         inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'], inpdict['BUSGRP'] = src.split(":")
-                    inpdict['CHAN'] = int(inpdict['CHAN'])
-                    inpdict['UNIT'] = int(inpdict['UNIT'])
+                    else:
+                        # Anything longer used to match no branch at all, leaving CHAN as
+                        # None until int(None) raised TypeError further down.
+                        raise Exception('Invalid Input String')
+                    try:
+                        inpdict['CHAN'] = int(inpdict['CHAN'])
+                        inpdict['UNIT'] = int(inpdict['UNIT'])
+                    except (TypeError, ValueError):
+                        raise Exception('Invalid Input String')
                 elif src.isdigit():
                     inpdict['CHAN'] = int(src)
                 else:
@@ -772,7 +779,12 @@ class XAPZone(MediaPlayerEntity):
             XOUT = output
         elif issubclass(type(output), str):
             if ":" in output:
-                XUNIT, XOUT =  output.split(":")
+                # "1:2:3" used to raise ValueError unpacking three parts into two, which
+                # surfaced at setup rather than as a config error.
+                parts = output.split(":")
+                if len(parts) != 2:
+                    raise Exception('Invalid Output String')
+                XUNIT, XOUT = parts
             elif output.isdigit():
                 # Unit 0, same as the bare int form. Without this XUNIT is never bound
                 # and the return below raises UnboundLocalError - and a bare numeric
@@ -785,7 +797,11 @@ class XAPZone(MediaPlayerEntity):
         else:
             # shouldn't be able to get here
             raise Exception('Invalid Output config format')
-        return int(XUNIT), int(XOUT)
+        try:
+            return int(XUNIT), int(XOUT)
+        except (TypeError, ValueError):
+            # e.g. "a:2" - reaches here with the parts split but not numeric
+            raise Exception('Invalid Output String')
 
     async def async_update(self):
         pass  # can't be changed except by us, so can track state without calls
