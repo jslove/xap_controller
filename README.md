@@ -186,3 +186,31 @@ With a âˆ’15 dB ceiling, 100% means âˆ’15 dB, and a zone at âˆ’22.5 
   ceiling and clamps anything above it, which is why a configured channel cannot report
   more than 1.0. The clamp only ever reduces a level, never raises one. A channel you left
   out of the config is not clamped, and can still read above 1.0.
+
+### MAXGAIN is a reference, not a hardware limiter
+
+Worth being explicit, because the name suggests otherwise. The 880 command reference
+documents no interaction between `GAIN` and `MAX`: `GAIN`'s only stated limit is that
+*"absolute values will be limited to the internal gain range"* - that is -65...20 dB, not
+MAXGAIN - and `MAX`'s own range is that same -65...20, which is not what a real limiter
+would need. The 2.371 reading above is the positive evidence: a channel really can sit
+above its own stated maximum.
+
+So MAXGAIN is a stored reference that *software* gives meaning to, and the clamp above is
+the only enforcement that exists on the serial path - not a second opinion on something
+the box already guarantees.
+
+What that does and does not cover:
+
+- Anything routed through this integration is genuinely protected, because `setPropGain`
+  cannot express a value above `1.0`, which *is* MAXGAIN.
+- Anything that bypasses it - G-Ware, the front panel, `xap_controller.send_command` - is
+  not protected at all. That is the case the clamp reports as an error on the next setup.
+
+### Choosing a ceiling on a channel with reserved headroom
+
+On a channel driven programmatically with headroom deliberately left below the ceiling,
+MAXGAIN *is* that headroom: lowering it costs boost range one dB for one dB. Setting
+`-15` on such a channel is not free, so pick the ceiling from the loudest level that
+channel should ever reach, not from what it happens to sit at today.
+
