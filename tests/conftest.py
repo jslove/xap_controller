@@ -142,3 +142,11 @@ def config_flow():
 
     importlib.import_module(_PKG)
     return importlib.import_module(f"{_PKG}.config_flow")
+
+
+@pytest.fixture(scope="session")
+def integration():
+    """The package __init__ itself - entry setup, unload and the options listener."""
+    import importlib
+
+    return importlib.import_module(_PKG)
