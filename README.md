@@ -138,6 +138,40 @@ command body; the `#5<unit>` prefix and the `\r` terminator are added for you.
   longest reply seen; asking for more tokens than arrive just returns what arrived.
 - A command the unit refuses comes back as `{"command": ..., "error": ...}` rather than
   raising, because a rejection is a normal result when probing an unfamiliar unit.
+
+### A bare `GAIN` write is relative, not absolute
+
+Reads are safe; writes are the trap. The Converge reference gives `GAIN` as
+
+```
+DEVICE GAIN <Channel> <Group> [Value] [Absol/Rel]      A = Absolute; R = Relative; Null = Relative
+```
+
+so the last argument **defaults to relative**. `GAIN 7 O -15` does not set output 7 to
+-15 dB, it drops it 15 dB from wherever it already is. Nothing rejects it and nothing
+logs it; the level is simply wrong, and wrong again by another 15 dB the next time.
+
+Two things make it worse than a one-off mistake:
+
+- `XAPCommand` retries after a telnet no-response, and a retried *relative* write applies
+  its delta twice. The retry is invisible, so the doubling is too.
+- Anything driving a channel through this service is outside the MAXGAIN ceiling, which
+  `setPropGain` enforces only because it cannot express a value above `1.0`. A relative
+  write has no such bound.
+
+**Always pass `A` explicitly when writing a level:**
+
+```yaml
+action: xap_controller.send_command
+data:
+  command: GAIN 7 O -15 A      # absolute; without the A this is -15 dB *relative*
+```
+
+The entities are unaffected either way - `setGain` and `setPropGain` always emit an
+explicit `A` or `R`, and nothing in the integration uses `R`. This applies only to
+commands you write by hand. Note the reply echoes which was used, so `GAIN 7 O -33.00 A`
+is confirmation that an absolute write landed.
+
 ## Max gain per output channel (safety ceiling)
 
 `MAXGAIN` is a per-channel ceiling in the XAP hardware: `GAIN` cannot be set above it.

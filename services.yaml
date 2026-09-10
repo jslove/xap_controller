@@ -11,6 +11,11 @@ send_command:
         The command body only — the device address and terminator are added for you.
         Examples: "VER", "GAIN 7 O", "LABEL 7 O", "MTRX 9 I 7 O", "MAX 7 O".
         An argument containing spaces must be quoted: LABEL 5 O "Living Room".
+
+        Those examples are all reads. A GAIN *write* defaults to RELATIVE: "GAIN 7 O -15"
+        drops the output 15 dB from wherever it is, it does not set it to -15 dB. Pass an
+        explicit A for absolute — "GAIN 7 O -15 A" — because a relative write is silent,
+        cumulative, and applied twice if the command is retried after a telnet timeout.
       required: true
       example: GAIN 7 O
       selector:
