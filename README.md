@@ -116,8 +116,8 @@ For the sources, set the gain levels in the Clearone Console app.  They are very
 
 ## Raw command access (`xap_controller.send_command`)
 
-For hands-on work on the unit â€” reading `LABEL`, `MTRX`, `MAX`, or trying anything the
-entities do not model â€” call the service rather than opening the serial port from another
+For hands-on work on the unit — reading `LABEL`, `MTRX`, `MAX`, or trying anything the
+entities do not model — call the service rather than opening the serial port from another
 process. `XAPCommand` owns the device address, the terminator, the response parsing and
 the lock, so going through it cannot collide with the entities mid-frame.
 
@@ -133,7 +133,7 @@ command body; the `#5<unit>` prefix and the `\r` terminator are added for you.
 
 - `unit` (default 0) addresses other XAPs on the expansion chain.
 - `return_count` (default 16) is how many trailing tokens of the reply to keep. It is a
-  tail, not a limit, so too small a value silently drops the front of the answer â€” at 2,
+  tail, not a limit, so too small a value silently drops the front of the answer — at 2,
   `LABEL 5 O` comes back as `- Patio` with the `3L` missing. The default is past the
   longest reply seen; asking for more tokens than arrive just returns what arrived.
 - A command the unit refuses comes back as `{"command": ..., "error": ...}` rather than
@@ -172,10 +172,15 @@ explicit `A` or `R`, and nothing in the integration uses `R`. This applies only 
 commands you write by hand. Note the reply echoes which was used, so `GAIN 7 O -33.00 A`
 is confirmation that an absolute write landed.
 
-## Max gain per output channel (safety ceiling)
+## Max gain per output channel (volume reference, and a soft ceiling)
 
-`MAXGAIN` is a per-channel ceiling in the XAP hardware: `GAIN` cannot be set above it.
-It is *also* the reference that Home Assistant's `volume_level` is measured against â€”
+**`MAXGAIN` is not a hardware limiter.** The Converge Pro 880 reference gives `GAIN`'s
+only bound as the internal range (−65...20 dB), documents no interaction with `MAX`, and
+gives `MAX` that same range — not what a real limiter would need. Written to −15.00 with
+`GAIN` left at −7.50, the unit simply leaves the level where it is, above its own stated
+maximum.
+
+What it *is* is the reference that Home Assistant's `volume_level` is measured against —
 `getPropGain`/`setPropGain` express level as a ratio of it, so `volume_level: 1.0`
 means "this channel's MAXGAIN".
 
@@ -186,7 +191,7 @@ which is bad twice over:
   that is not a volume anyone intended.
 - **Usability.** Real listening levels are far below that, so they crowd into the very
   bottom of the slider. On the unit this was written against, four zones sitting between
-  âˆ’22.5 and âˆ’33 dB all landed under **1%** â€” the whole useful range inside two pixels of
+  −22.5 and −33 dB all landed under **1%** — the whole useful range inside two pixels of
   travel.
 
 Set the optional **Max gain** field on the Sources & Zones step to a JSON object mapping
@@ -204,18 +209,18 @@ qualified form, or only the master gets a ceiling and the rest keep the factory 
 {"7": -15, "8": -15, "1:1": -12, "1:2": -12}
 ```
 
-With a âˆ’15 dB ceiling, 100% means âˆ’15 dB, and a zone at âˆ’22.5 dB shows as about 42%.
+With a −15 dB ceiling, 100% means −15 dB, and a zone at −22.5 dB shows as about 42%.
 
-- Values must be between âˆ’65 and +20 dB; channels you leave out are not touched.
+- Values must be between −65 and +20 dB; channels you leave out are not touched.
 - Leave the field blank to keep the old behaviour and not write MAXGAIN at all.
 - The ceilings are re-applied on every setup, so a change made in G-Ware or from the
   front panel is restored the next time Home Assistant starts.
-- **Lowering a ceiling pulls that channel's GAIN down to it â€” but the integration does
+- **Lowering a ceiling pulls that channel's GAIN down to it — but the integration does
   that, not the hardware.** The XAP leaves an existing level exactly where it was, above
-  its own stated maximum. On 2026-09-06 a reload wrote all eight ceilings to âˆ’15.00 while
-  the outputs stayed between âˆ’7.50 and âˆ’13.34; `volume_level` is a ratio against MAXGAIN,
-  so those zones reported values greater than 1.0 â€” `zone_kitchen_dining` read **2.371**, a
-  slider at 237% â€” and every slider move wrote dB against a ceiling the levels had never
+  its own stated maximum. On 2026-09-06 a reload wrote all eight ceilings to −15.00 while
+  the outputs stayed between −7.50 and −13.34; `volume_level` is a ratio against MAXGAIN,
+  so those zones reported values greater than 1.0 — `zone_kitchen_dining` read **2.371**, a
+  slider at 237% — and every slider move wrote dB against a ceiling the levels had never
   been chosen for. `_apply_max_gain` now reads each listed channel back after writing its
   ceiling and clamps anything above it, which is why a configured channel cannot report
   more than 1.0. The clamp only ever reduces a level, never raises one. A channel you left

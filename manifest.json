@@ -5,7 +5,7 @@
     "documentation": "https://github.com/jslove/xap_controller/blob/master/README.md",
     "dependencies": [],
     "codeowners": ["jslove"],
-    "version": "2026.09.10.2",
+    "version": "2026.09.10.3",
     "iot_class": "local_polling",
     "requirements": [
       "XAPX00@git+https://github.com/jslove/XAPX00.git@2026.09.08" ]

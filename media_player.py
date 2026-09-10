@@ -228,7 +228,7 @@ SEND_COMMAND_SCHEMA = vol.Schema(
         # `rtnCount` is "keep the last N whitespace-separated tokens of the reply", so a
         # small value silently truncates: at 2, `LABEL 5 O` returns ["-", "Patio"] and
         # loses the "3L". 16 is past the longest reply seen, and asking for more tokens
-        # than arrive simply returns what arrived â€” so the default shows the whole line.
+        # than arrive simply returns what arrived — so the default shows the whole line.
         vol.Optional("return_count", default=16): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=64)
         ),
@@ -410,15 +410,23 @@ async def _prewarm_max_gain(hass, xapconn, zones):
 async def _apply_max_gain(hass, xapconn, raw):
     """Write the configured per-channel MAXGAIN ceilings to the unit.
 
-    MAXGAIN is a safety limit in the hardware â€” GAIN cannot be set above it â€” and it is
-    also the reference a 1.0 volume_level maps to. Both reasons to configure it: an
-    unconfigured unit sits at the +20 dB factory maximum, so a full-scale slider is a
-    speaker-damaging level AND every realistic listening level crowds into the bottom
-    couple of percent of the slider.
+    MAXGAIN is NOT a hardware limiter. The 880 reference gives GAIN's only bound as the
+    internal range (-65..20), documents no interaction with MAX, and gives MAX that same
+    range — not what a real limiter would need. It is a stored number the software gives
+    meaning to: setPropGain is what maps a 1.0 volume_level onto it, in Python. So the
+    ceiling is real, but it is enforced here, on this path only — anything reaching the
+    unit another way (send_command, G-Ware, the front panel) is unbounded by it.
+
+    It is also the boost budget: for a channel driven below its ceiling, the room above is
+    what is left to boost into, so lowering MAXGAIN costs boost range one dB for one dB.
+
+    Both of those are reasons to configure it. An unconfigured unit sits at the +20 dB
+    factory maximum, so a full-scale slider is a speaker-damaging level AND every
+    realistic listening level crowds into the bottom couple of percent of the slider.
 
     Applied on every setup rather than once, so the ceiling is restored after anyone
     edits it in G-Ware or from the front panel. Channels left out of the config are not
-    touched â€” including by the clamp below.
+    touched — including by the clamp below.
 
     Each listed channel is then clamped to its ceiling, because lowering MAXGAIN does not
     move a GAIN that is already above it. See the comment in the loop for what that cost.
