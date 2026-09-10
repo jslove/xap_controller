@@ -1,6 +1,6 @@
 """Editing options has to reach the running integration.
 
-The options flow writes into entry.data, but entities read source_trim at construction
+The options flow writes into entry.data, but entities read expose_source_gain at construction
 and max_gain is applied once during setup. Without an update listener the form saves
 successfully and nothing changes until Home Assistant restarts.
 """

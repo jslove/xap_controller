@@ -33,7 +33,7 @@ async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the entry so edited options actually take effect.
 
     The options flow writes straight into entry.data, but nothing re-reads it: entities
-    take source_trim at construction and max_gain is applied once during setup. Without
+    take expose_source_gain at construction and max_gain is applied once during setup. Without
     this listener, saving the form stores the new value and the running integration keeps
     the old one until Home Assistant restarts - a source stays "does not support volume"
     with the box ticked, and an edited ceiling is never written to the unit.

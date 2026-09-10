@@ -34,7 +34,7 @@
         "data": {
           "sources": "Sources (JSON)",
           "zones": "Zones (JSON)",
-          "source_trim": "Allow source input gain to be set from the UI",
+          "expose_source_gain": "Allow source input gain to be set from the UI",
           "max_gain": "Max gain per output channel (JSON, optional)"
         }
       }
@@ -84,7 +84,7 @@
         "data": {
           "sources": "Sources (JSON)",
           "zones": "Zones (JSON)",
-          "source_trim": "Allow source input gain to be set from the UI",
+          "expose_source_gain": "Allow source input gain to be set from the UI",
           "max_gain": "Max gain per output channel (JSON, optional)"
         }
       }
