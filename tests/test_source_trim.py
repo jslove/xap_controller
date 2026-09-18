@@ -387,14 +387,34 @@ def test_the_miss_counter_resets_once_the_connection_appears(component, number_p
         "the counter did not reset, so the warning came early"
 
 
-def test_the_entity_is_updated_before_it_is_added(component, number_platform):
-    """Otherwise it sits at `unknown` with placeholder bounds until the first tick, and a
-    set in that window validates against those bounds before being silently clamped."""
+def test_the_first_read_is_not_update_before_add(component, number_platform):
+    """Home Assistant runs update_before_add for disabled entities too, and these are
+    disabled by default. tests_ha/test_trim.py counts the round trips for real."""
     added = Collector()
     entry = FakeEntry({"Laptop": [9]})
     hass = FakeHass({entry.entry_id: FakeConn(gains={9: -6.0}, ceilings={9: 0.0})})
     asyncio.run(number_platform.async_setup_entry(hass, entry, added))
-    assert added.update_before_add is True
+    assert added.update_before_add is False
+
+
+def test_the_entity_is_read_when_added(component, number_platform):
+    """Otherwise it sits at `unknown` with placeholder bounds until the first tick, and a
+    set in that window validates against those bounds before being silently clamped."""
+    conn = FakeConn(gains={9: -6.0}, ceilings={9: 0.0})
+    entity = build(number_platform, conn, {"Laptop": [9]})[0]
+    asyncio.run(entity.async_added_to_hass())
+    assert entity.native_value == pytest.approx(-6.0)
+    assert entity.native_max_value == pytest.approx(0.0)
+
+
+def test_being_added_before_the_connection_exists_is_not_an_error(component,
+                                                                  number_platform):
+    """The number platform can set up ahead of media_player; the tick catches up."""
+    added = Collector()
+    entry = FakeEntry({"Laptop": [9]})
+    asyncio.run(number_platform.async_setup_entry(FakeHass({}), entry, added))
+    asyncio.run(added.entities[0].async_added_to_hass())
+    assert added.entities[0].native_value is None
 
 
 def test_setting_a_trim_publishes_the_new_state(component, number_platform):

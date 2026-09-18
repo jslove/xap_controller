@@ -24,7 +24,7 @@ import math
 
 from homeassistant.components.number import NumberEntity
 from homeassistant.const import EntityCategory
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from .config_flow import CONF_SOURCES
 from .media_player import (
@@ -68,11 +68,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         for index, inp in enumerate(inputs):
             entities.append(XAPSourceTrim(hass, entry, source_name, inp, index, len(inputs)))
 
-    # update_before_add so the entity arrives with its real value and its real bounds.
-    # Without it it sits at `unknown` with the -65..+20 placeholder range until the first
-    # refresh tick, and a set in that window passes Home Assistant's range validation
-    # against placeholder bounds before being silently clamped against the real ceiling.
-    async_add_entities(entities, update_before_add=True)
+    # Not update_before_add: Home Assistant runs that for disabled entities as well, and
+    # these are disabled by default - two serial round trips per channel on every setup
+    # and reload, for entities nobody turned on. The first read is in async_added_to_hass
+    # instead, which only an enabled entity reaches.
+    async_add_entities(entities)
     # Refreshed by the entry's own timer rather than this platform's default interval,
     # so trim reads queue with everything else on the one connection instead of
     # arriving on a second clock and meeting them at the lock.
@@ -121,6 +121,22 @@ class XAPSourceTrim(NumberEntity):
     def __str__(self):
         return self._attr_name
 
+    async def async_added_to_hass(self):
+        """Read the channel before the first state write.
+
+        So the entity arrives with its real value and bounds instead of `unknown` over
+        the -65..+20 placeholder - a set in that window passes Home Assistant's range
+        validation against the placeholder, then is clamped against the real ceiling.
+        This relies on media_player having set up first, which __init__ orders.
+
+        Best effort: a read that fails is left to the refresh tick. Raising here would
+        drop the entity until the next reload instead.
+        """
+        try:
+            await self.async_update()
+        except HomeAssistantError as err:
+            _LOGGER.debug("%s: first read failed (%s); leaving it to the refresh", self, err)
+
     def _conn(self):
         """Resolved per call, never captured.
 
@@ -148,11 +164,11 @@ class XAPSourceTrim(NumberEntity):
         try:
             conn = self._conn()
         except ServiceValidationError as err:
-            # Not on the first miss. This platform can set up before media_player has put
-            # the connection into hass.data - observed on every restart of a real
-            # install, reported as "keys present: []" and resolved by the next tick. That
-            # is a normal startup order, not a fault, and warning about it trains people
-            # to ignore the message that matters.
+            # Not on the first miss. There is no connection between an unload and the
+            # next setup, and - before __init__ ordered the platforms - this one set up
+            # ahead of media_player on every restart of a real install. Neither is a
+            # fault, and warning about them trains people to ignore the message that
+            # matters.
             #
             # Still said eventually, because an entity that is permanently unavailable
             # with nothing in the log is a miserable thing to debug from the outside.
