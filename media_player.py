@@ -803,7 +803,6 @@ class XAPSource(MediaPlayerEntity):
         self._name = source_name
         self._xapx00 = xapconn
         self._expose_gain = expose_gain
-        self._state = STATE_OFF
         self.xunit = 0
         self.xinput = None
         self.xgroup = "I"
@@ -813,7 +812,7 @@ class XAPSource(MediaPlayerEntity):
         self.parse_source(source_inputs)
         self.numChannels = len(self._inputs)
         self._volume = 0
-        self._isMuted = 1
+        self._isMuted = 1  # which is also "off" - see the state property
         self._first_connect = 0
         channels = ",".join(str(i) for i in source_inputs)
         self._attr_unique_id = f"XAP-Source-{self._xapx00.conn_id}-{channels}"
@@ -856,10 +855,6 @@ class XAPSource(MediaPlayerEntity):
         # The unit is the authority at startup; there is nothing here to sync it to.
         self._volume = await self._get_volume_level()
         await self._get_mute_status()
-        if self._isMuted:
-            self._state = STATE_OFF
-        else:
-            self._state = STATE_ON
         await self.async_mute_volume(self._isMuted)  # sync
         self._first_connect = 1
         _LOGGER.debug('%s: firstConnect complete' % self._name)
@@ -867,7 +862,6 @@ class XAPSource(MediaPlayerEntity):
     def _startOffline(self):
         self._volume = 0
         self._isMuted = 1
-        self._state = STATE_OFF
         _LOGGER.debug('%s: startOffline complete' % self._name)
 
     def parse_source(self, srcs):
@@ -892,8 +886,22 @@ class XAPSource(MediaPlayerEntity):
 
     @property
     def state(self):
-        """Return the state of the device."""
-        return self._state
+        """Off exactly when the inputs are muted.
+
+        A source has no power of its own: turn_off mutes its inputs, turn_on unmutes
+        them, and the refresh reads on/off back from the mute. This used to be a separate
+        `_state` that every path but one kept in step - volume_mute changed the mute and
+        left `_state` alone. So a mute published "on" with is_volume_muted true, the next
+        tick flipped it to "off", and an unmute after that tick published "off" for up to
+        a whole refresh period while the input was plainly live. Derived, the two cannot
+        disagree.
+
+        The consequence to know when reading it: Home Assistant drops every media
+        attribute, is_volume_muted included, from a player that is off. A muted source
+        therefore shows as state "off" with no is_volume_muted at all; test the state,
+        not the attribute.
+        """
+        return STATE_OFF if self._isMuted else STATE_ON
 
     @property
     def supported_features(self):
@@ -991,14 +999,10 @@ class XAPSource(MediaPlayerEntity):
         if not self._first_connect:
             await self._firstConnect()
         await self.async_mute_volume(mute=0)
-        self._state = STATE_ON
-        self._publish()
 
     async def async_turn_off(self):
         """Turn off media player."""
         await self.async_mute_volume(mute=1)
-        self._state = STATE_OFF
-        self._publish()
 
     async def async_update(self):
         """Re-read level and mute from the unit.
@@ -1014,7 +1018,6 @@ class XAPSource(MediaPlayerEntity):
             return
         await self._get_volume_level()
         await self._get_mute_status()
-        self._state = STATE_OFF if self._isMuted else STATE_ON
 
 
 class XAPZone(MediaPlayerEntity):
