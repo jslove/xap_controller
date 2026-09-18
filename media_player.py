@@ -1011,8 +1011,7 @@ class XAPSource(MediaPlayerEntity):
         `_firstConnect` cached at setup. Anything that changed the unit afterwards - the
         front panel, G-Ware, a serial command - left the entity stale indefinitely, and
         a source showing "off" while its channel was plainly unmuted is a confusing
-        place to start debugging silence. Zones already polled; this brings sources into
-        line.
+        place to start debugging silence.
         """
         if not self.connectionLive():
             return
@@ -1137,7 +1136,31 @@ class XAPZone(MediaPlayerEntity):
             raise Exception('Invalid Output String')
 
     async def async_update(self):
-        pass  # can't be changed except by us, so can track state without calls
+        """Re-read mute and level from the unit.
+
+        This was `pass`, on the grounds that nothing but this integration could change a
+        zone. That stopped being true: send_command sends a raw `MUTE 5 O 1`, and G-Ware
+        and the front panel reach the unit too. Unlike a source, where muted means off, a
+        zone's on/off comes from routing, so a zone muted from outside stayed "on" with
+        is_volume_muted false - silent while reporting itself on and unmuted.
+
+        Two queries per zone per tick, both on the first output, which is the channel
+        the getters and setters already report: one MUTE, and one GAIN (getPropGain's
+        MAXGAIN comes from XAPX00's cache, warmed at setup).
+
+        Routing is deliberately not re-read. `_get_source` costs one MTRX per configured
+        source until it finds a live crosspoint, so a zone that is off - the usual case -
+        pays for every source on every tick, zones x sources in all. And routing decides
+        on/off, which re-reading needs more than a call here to get right: `_get_source`
+        keeps the previous source when nothing is routed, so a zone switched off from
+        outside would never read as off; and turn_on publishes "on" even with no source to
+        restore, which a routing tick would flip back to "off" - the setter/tick
+        disagreement XAPSource.state is derived to avoid.
+        """
+        if not self.connectionLive():
+            return
+        await self._get_mute_status()
+        await self._get_volume_level()
 
     def _publish(self):
         """Push in-memory state into Home Assistant's state machine.

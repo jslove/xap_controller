@@ -167,6 +167,14 @@ command body; the `#5<unit>` prefix and the `\r` terminator are added for you.
 - A command the unit refuses comes back as `{"command": ..., "error": ...}` rather than
   raising, because a rejection is a normal result when probing an unfamiliar unit.
 
+The entities pick up what a command changed on their next refresh (30 s on serial, 10 s
+on telnet): a source's level and mute, and a zone's level and mute. A zone's *source* is
+not re-read, because that is a query per configured source on every tick. So a routing
+change made with `MTRX` shows in Home Assistant only after the integration is reloaded or
+Home Assistant restarts. Until then the zone
+works from the old route: selecting the source it still shows re-routes that source
+without clearing yours, and both play into the zone.
+
 ### A bare `GAIN` write is relative, not absolute
 
 Reads are safe; writes are the trap. The Converge reference gives `GAIN` as

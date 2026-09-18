@@ -5,8 +5,8 @@ only writes an entity's state back after a service call when `should_poll` is tr
 every setter has to do it itself. Without this a `volume_set` updates `self._volume` and
 the state machine keeps the old value until the next refresh tick — a dashboard slider
 springs back after being dragged, and an automation that selects a source and then reads
-it gets the previous one. `XAPZone` is worst hit: its `async_update` is `pass`, so it had
-relied entirely on the post-service write.
+it gets the previous one. `XAPZone` was worst hit: its `async_update` was `pass`, so it
+had relied entirely on the post-service write - and it still never re-reads its source.
 """
 
 import asyncio
@@ -104,7 +104,7 @@ def test_every_source_setter_publishes(component, call):
     lambda e: e.async_turn_off(),
 ])
 def test_every_zone_setter_publishes(component, call):
-    """The zone relied on this entirely - its async_update is a no-op."""
+    """The tick re-reads mute and level but not the source, so select_source relies on it."""
     e = zone(component)
     asyncio.run(call(e))
     assert e.state_writes > 0
