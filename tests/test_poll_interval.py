@@ -23,6 +23,22 @@ class FakeEntry:
     def async_on_unload(self, fn):
         self.on_unload.append(fn)
 
+    def unload(self):
+        """Run the callbacks the way Home Assistant does, return values included.
+
+        ConfigEntry._async_process_on_unload schedules any truthy return value as a
+        coroutine. A stub that just calls the callbacks and discards the result let a
+        `lambda: store.pop(...)` through - it returns the popped dict, which on a real
+        instance raised TypeError and left the entry stuck in failed_unload.
+        """
+        for fn in self.on_unload:
+            result = fn()
+            if result:
+                assert asyncio.iscoroutine(result), (
+                    f"unload callback returned {type(result).__name__}; Home Assistant "
+                    "would try to schedule it as a coroutine and fail the unload"
+                )
+
 
 class FakeEntity:
     """Stands in for a source or zone entity as the refresh loop sees it."""
@@ -110,8 +126,7 @@ def test_the_timer_is_unsubscribed_with_the_entry(component):
     entry = FakeEntry("serial")
     register(component, entry, [])
     assert entry.on_unload, "timer would outlive the entry and leak on reload"
-    for unsub in entry.on_unload:
-        unsub()
+    entry.unload()
     import homeassistant.helpers.event as event
     assert event.unsubscribed
 
@@ -243,8 +258,7 @@ def test_unloading_clears_the_entry_from_the_store(component):
     hass, entry = FakeHass(), FakeEntry("serial")
     register(component, entry, [FakeEntity("a")], hass=hass)
     assert hass.data[component.POLL_KEY]
-    for unsub in entry.on_unload:
-        unsub()
+    entry.unload()
     assert not hass.data[component.POLL_KEY]
 
 
@@ -254,11 +268,17 @@ def test_a_reload_starts_a_fresh_timer_rather_than_appending(component):
     hass, entry = FakeHass(), FakeEntry("serial")
     old = FakeEntity("old")
     register(component, entry, [old], hass=hass)
-    for unsub in entry.on_unload:
-        unsub()
+    entry.unload()
 
     new = FakeEntity("new")
     action, _ = register(component, entry, [new], hass=hass)
     assert len(event.tracked) == 2
     asyncio.run(action(None))
     assert new.updates == 1 and old.updates == 0, "the dead entity was still refreshed"
+
+
+def test_unload_callbacks_honour_home_assistants_contract(component):
+    """The regression that took the whole integration down on a live reload."""
+    hass, entry = FakeHass(), FakeEntry("serial")
+    register(component, entry, [FakeEntity("a")], hass=hass)
+    entry.unload()           # raises if any callback returns a non-coroutine truthy value

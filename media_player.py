@@ -681,7 +681,14 @@ def register_for_polling(hass, entry, entities):
             state["running"] = False
 
     entry.async_on_unload(async_track_time_interval(hass, _refresh, interval))
-    entry.async_on_unload(lambda: store.pop(entry.entry_id, None))
+    def _forget():
+        # Must return None. Home Assistant schedules a truthy return value from an
+        # unload callback as a coroutine, and `lambda: store.pop(...)` returned the
+        # popped dict - which raised TypeError on the first reload and left the entry in
+        # failed_unload, taking every entity down until a restart (2026-09-18).
+        store.pop(entry.entry_id, None)
+
+    entry.async_on_unload(_forget)
     _LOGGER.debug("Refreshing entry %s every %s over %s", entry.entry_id, interval, conn_type)
 
 
