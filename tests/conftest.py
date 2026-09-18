@@ -42,7 +42,8 @@ def _install_stubs():
     const.STATE_OFF = "off"
     const.STATE_ON = "on"
     const.CONF_NAME = "name"
-    const.Platform = types.SimpleNamespace(MEDIA_PLAYER="media_player")
+    const.Platform = types.SimpleNamespace(MEDIA_PLAYER="media_player", NUMBER="number")
+    const.EntityCategory = types.SimpleNamespace(CONFIG="config", DIAGNOSTIC="diagnostic")
 
     core = _module("homeassistant.core")
     core.HomeAssistant = type("HomeAssistant", (), {})
@@ -61,15 +62,66 @@ def _install_stubs():
     exc.ServiceValidationError = ServiceValidationError
 
     helpers = _module("homeassistant.helpers")
+
+    # Records the registered callback and interval, and hands back an unsub the caller
+    # is expected to pass to entry.async_on_unload.
+    event = _module("homeassistant.helpers.event")
+
+    def _async_track_time_interval(hass, action, interval, **kwargs):
+        event.tracked.append((action, interval))
+        return lambda: event.unsubscribed.append(action)
+
+    event.tracked = []
+    event.unsubscribed = []
+    event.async_track_time_interval = _async_track_time_interval
+    helpers.event = event
+
     cv = _module("homeassistant.helpers.config_validation")
     cv.string = str
     helpers.config_validation = cv
 
+    # Home Assistant writes an entity's state back after a service call ONLY when
+    # should_poll is true. These entities opt out, so every setter has to publish for
+    # itself - and a stub that silently accepts async_write_ha_state cannot tell whether
+    # it was called. Counting it is what makes that testable.
+    def _record_write(self):
+        self.state_writes = getattr(self, "state_writes", 0) + 1
+
     comp = _module("homeassistant.components")
     mp = _module("homeassistant.components.media_player")
-    mp.MediaPlayerEntity = type("MediaPlayerEntity", (), {})
+    # Entity.should_poll defaults True and is backed by _attr_should_poll, which is
+    # how an entity opts out of Home Assistant's own polling.
+    mp.MediaPlayerEntity = type(
+        "MediaPlayerEntity", (),
+        {"should_poll": property(lambda self: getattr(self, "_attr_should_poll", True)),
+         "async_write_ha_state": _record_write,
+         "entity_id": None, "hass": None},
+    )
     mp.MediaType = types.SimpleNamespace(MUSIC="music")
     comp.media_player = mp
+
+    # Home Assistant's Entity exposes every `_attr_x` as a read-only `x` property, and
+    # the component relies on that rather than defining each one. Reproduce it for the
+    # handful the trim entity uses, or every read comes back AttributeError.
+    _ATTR_PROPS = (
+        "name", "unique_id", "entity_category", "entity_registry_enabled_default",
+        "should_poll",
+        "native_value", "native_unit_of_measurement", "native_min_value",
+        "native_max_value", "native_step", "available",
+    )
+
+
+    def _attr_property(attr):
+        return property(lambda self: getattr(self, f"_attr_{attr}", None))
+
+    num = _module("homeassistant.components.number")
+    num.NumberEntity = type(
+        "NumberEntity", (),
+        {**{a: _attr_property(a) for a in _ATTR_PROPS},
+         "async_write_ha_state": _record_write,
+         "entity_id": None, "hass": None},
+    )
+    comp.number = num
 
     mp_const = _module("homeassistant.components.media_player.const")
 
@@ -150,3 +202,11 @@ def integration():
     import importlib
 
     return importlib.import_module(_PKG)
+
+
+@pytest.fixture(scope="session")
+def number_platform():
+    import importlib
+
+    importlib.import_module(_PKG)
+    return importlib.import_module(f"{_PKG}.number")

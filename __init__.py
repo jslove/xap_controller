@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from .config_flow import CONF_PATH, CONF_SOURCES, CONF_ZONES
 
 DOMAIN = "xap_controller"
-PLATFORMS = [Platform.MEDIA_PLAYER]
+PLATFORMS = [Platform.MEDIA_PLAYER, Platform.NUMBER]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +44,12 @@ async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up XAP Controller from a config entry."""
     entry.async_on_unload(entry.add_update_listener(_options_updated))
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # media_player first and on its own: it opens the connection the number platform
+    # reads through. Forwarded together the two race, and number usually won - so its
+    # entities were unavailable until the first refresh tick, and a service call skips
+    # an unavailable entity without a word: a trim set in that window did nothing.
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.MEDIA_PLAYER])
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.NUMBER])
     return True
 
 

@@ -4,6 +4,7 @@ on:
   push:
     branches: [master, next]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   pytest:
@@ -20,3 +21,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install pytest
       - run: python -m pytest tests -q
+
+  home-assistant:
+    # The same component inside a real Home Assistant, for what the stubs cannot see:
+    # config entry setup/unload/reload, the state machine, the service layer. A separate
+    # job because the stub suite puts a fake `homeassistant` in sys.modules.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Pinned, because each release of this package pins one Home Assistant release.
+      # Bump it to test against a newer Home Assistant.
+      - run: pip install pytest-homeassistant-custom-component==0.13.316
+      - run: python -m pytest tests_ha -q
