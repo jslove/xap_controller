@@ -6,6 +6,7 @@
         "data": {
           "name": "Name",
           "XAPType": "Device type",
+          "unit_types": "Unit types (optional): unit:type for any chained unit of a different model, e.g. 2:CP880",
           "stereo": "Stereo mode (deprecated)",
           "connection_type": "Connection type"
         }
@@ -43,6 +44,7 @@
       "cannot_connect": "Unable to connect to the XAP unit. Check your connection settings. You may still proceed if the connection is intermittent.",
       "invalid_sources": "Invalid sources JSON. Expected an object mapping names to lists of channel specs.",
       "invalid_zones": "Invalid zones JSON. Expected an object mapping names to lists of channel specs.",
+      "invalid_unit_types": "Invalid unit types. Expected unit:type pairs separated by commas, unit 0-7 and type one of XAP800, XAP400, CP880, CP880T, CP880TA, e.g. 2:CP880.",
       "invalid_max_gain": "Invalid max gain JSON. Expected an object mapping output channels to a dB value between -65 and 20, e.g. \"7\": -15, \"1:1\": -12. Keys are a bare channel or \"unit:channel\"."
     },
     "abort": {
@@ -56,6 +58,7 @@
         "data": {
           "name": "Name",
           "XAPType": "Device type",
+          "unit_types": "Unit types (optional): unit:type for any chained unit of a different model, e.g. 2:CP880",
           "stereo": "Stereo mode (deprecated)",
           "connection_type": "Connection type"
         }
@@ -93,6 +96,7 @@
       "cannot_connect": "Unable to connect to the XAP unit.",
       "invalid_sources": "Invalid sources JSON. Expected an object mapping names to lists of channel specs.",
       "invalid_zones": "Invalid zones JSON. Expected an object mapping names to lists of channel specs.",
+      "invalid_unit_types": "Invalid unit types. Expected unit:type pairs separated by commas, unit 0-7 and type one of XAP800, XAP400, CP880, CP880T, CP880TA, e.g. 2:CP880.",
       "invalid_max_gain": "Invalid max gain JSON. Expected an object mapping output channels to a dB value between -65 and 20, e.g. \"7\": -15, \"1:1\": -12. Keys are a bare channel or \"unit:channel\"."
     }
   }

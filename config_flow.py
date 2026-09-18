@@ -26,6 +26,7 @@ CONF_TELNET_USERNAME = "telnet_username"
 CONF_TELNET_PASSWORD = "telnet_password"
 CONF_EXPOSE_SOURCE_GAIN = "expose_source_gain"
 CONF_MAX_GAIN = "max_gain"
+CONF_UNIT_TYPES = "unit_types"
 
 XAP_TYPES = ["XAP800", "XAP400", "CP880", "CP880T", "CP880TA"]
 BAUD_RATES = [9600, 19200, 38400, 57600]
@@ -34,6 +35,7 @@ CONNECTION_TYPES = ["serial", "telnet"]
 SOURCES_EXAMPLE = '{"Home Audio": [9], "TV": ["1:11:O:E"]}'
 ZONES_EXAMPLE = '{"Kitchen": [3], "Office": ["2:1", "2:2"]}'
 MAX_GAIN_EXAMPLE = '{"7": -15, "8": -15, "1:1": -12}'
+UNIT_TYPES_EXAMPLE = "2:CP880"
 
 # The XAP800 output gain range. MAXGAIN is the ceiling GAIN may be set to, and it is
 # what a 1.0 volume_level means: getPropGain/setPropGain express level as a ratio
@@ -61,6 +63,30 @@ def parse_channel_key(key) -> tuple:
     if channel < 1:
         raise ValueError(f"channel {channel} must be 1 or greater")
     return unit, channel
+
+
+def _validate_unit_types(text: str) -> dict:
+    """Parse "unit:type, unit:type" into {unit: type}. Blank means every unit is XAPType.
+
+    The command prefix is "#<type><id>" and the type is per MODEL - an 880T answers
+    "#D<id>", a plain 880 "#1<id>" - so a chain that mixes models needs a type per
+    unit. This names the exceptions; everything else keeps the device type above.
+    """
+    if not text or not text.strip():
+        return {}
+    result = {}
+    for item in text.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        unit_text, sep, type_text = item.partition(":")
+        unit_text, type_text = unit_text.strip(), type_text.strip()
+        if not sep or not unit_text.isdigit() or not 0 <= int(unit_text) <= 7:
+            raise vol.Invalid("invalid_unit_types")
+        if type_text not in XAP_TYPES or int(unit_text) in result:
+            raise vol.Invalid("invalid_unit_types")
+        result[int(unit_text)] = type_text
+    return result
 
 
 def _validate_max_gain(json_str: str) -> dict:
@@ -159,6 +185,7 @@ def _build_xapconn(data):
 
     conn_type = data.get(CONF_CONNECTION_TYPE, "serial")
     xap_type = data.get(CONF_TYPE, "XAP800")
+    unit_types = _validate_unit_types(data.get(CONF_UNIT_TYPES, ""))
     if conn_type == "telnet":
         xapconn = XAPX00(
             connection_type="telnet",
@@ -167,6 +194,7 @@ def _build_xapconn(data):
             telnet_username=data.get(CONF_TELNET_USERNAME, "clearone"),
             telnet_password=data.get(CONF_TELNET_PASSWORD, "converge"),
             XAPType=xap_type,
+            unit_types=unit_types,
         )
     else:
         # baudRate must be a constructor argument, not assigned afterwards: the
@@ -176,6 +204,7 @@ def _build_xapconn(data):
             data.get(CONF_PATH, "/dev/ttyUSB0"),
             baudRate=data.get(CONF_BAUD, 38400),
             XAPType=xap_type,
+            unit_types=unit_types,
         )
     return xapconn
 
@@ -193,16 +222,22 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
-            self._connection_data = user_input
-            conn_type = user_input.get(CONF_CONNECTION_TYPE, "serial")
-            if conn_type == "telnet":
-                return await self.async_step_telnet()
-            return await self.async_step_serial()
+            try:
+                _validate_unit_types(user_input.get(CONF_UNIT_TYPES, ""))
+            except vol.Invalid:
+                errors[CONF_UNIT_TYPES] = "invalid_unit_types"
+            if not errors:
+                self._connection_data = user_input
+                conn_type = user_input.get(CONF_CONNECTION_TYPE, "serial")
+                if conn_type == "telnet":
+                    return await self.async_step_telnet()
+                return await self.async_step_serial()
 
         schema = vol.Schema(
             {
                 vol.Required(CONF_NAME, default="XAP"): str,
                 vol.Optional(CONF_TYPE, default="XAP800"): vol.In(XAP_TYPES),
+                vol.Optional(CONF_UNIT_TYPES, default=""): str,
                 vol.Optional(CONF_STEREO, default=False): bool,
                 vol.Optional(CONF_CONNECTION_TYPE, default="serial"): vol.In(
                     CONNECTION_TYPES
@@ -377,11 +412,16 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
         current = self._entry.data
 
         if user_input is not None:
-            self._connection_data = user_input
-            conn_type = user_input.get(CONF_CONNECTION_TYPE, "serial")
-            if conn_type == "telnet":
-                return await self.async_step_telnet()
-            return await self.async_step_serial()
+            try:
+                _validate_unit_types(user_input.get(CONF_UNIT_TYPES, ""))
+            except vol.Invalid:
+                errors[CONF_UNIT_TYPES] = "invalid_unit_types"
+            if not errors:
+                self._connection_data = user_input
+                conn_type = user_input.get(CONF_CONNECTION_TYPE, "serial")
+                if conn_type == "telnet":
+                    return await self.async_step_telnet()
+                return await self.async_step_serial()
 
         schema = vol.Schema(
             {
@@ -389,6 +429,9 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_TYPE, default=current.get(CONF_TYPE, "XAP800")
                 ): vol.In(XAP_TYPES),
+                vol.Optional(
+                    CONF_UNIT_TYPES, default=current.get(CONF_UNIT_TYPES, "")
+                ): str,
                 vol.Optional(
                     CONF_STEREO, default=current.get(CONF_STEREO, False)
                 ): bool,
