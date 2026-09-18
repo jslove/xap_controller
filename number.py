@@ -81,6 +81,7 @@ class XAPSourceTrim(NumberEntity):
     # entity's own settings dialog, per channel, rather than a trip through the config
     # flow to enable it globally and another trip to put it back.
     _attr_entity_registry_enabled_default = False
+    _lookup_failed = False
 
     def __init__(self, hass, entry, source_name, inp, index, of_many):
         self.hass = hass
@@ -128,8 +129,17 @@ class XAPSourceTrim(NumberEntity):
         # permanently unavailable entity with nothing in the log to say why.
         try:
             conn = self._conn()
-        except ServiceValidationError:
+        except ServiceValidationError as err:
+            # Said once rather than every poll. An entity that cannot find its
+            # connection is otherwise just permanently unavailable with no reason given,
+            # which is a miserable thing to debug from the outside.
+            if not self._lookup_failed:
+                self._lookup_failed = True
+                _LOGGER.warning("%s: no connection for entry %s (%s); keys present: %s",
+                                self, self._entry_id, err,
+                                sorted(self.hass.data.get(DOMAIN, {})))
             return False
+        self._lookup_failed = False
         return bool(conn.connectionLive)
 
     @handle_xap_exceptions
