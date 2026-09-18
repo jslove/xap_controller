@@ -80,13 +80,22 @@ def _install_stubs():
     cv.string = str
     helpers.config_validation = cv
 
+    # Home Assistant writes an entity's state back after a service call ONLY when
+    # should_poll is true. These entities opt out, so every setter has to publish for
+    # itself - and a stub that silently accepts async_write_ha_state cannot tell whether
+    # it was called. Counting it is what makes that testable.
+    def _record_write(self):
+        self.state_writes = getattr(self, "state_writes", 0) + 1
+
     comp = _module("homeassistant.components")
     mp = _module("homeassistant.components.media_player")
     # Entity.should_poll defaults True and is backed by _attr_should_poll, which is
     # how an entity opts out of Home Assistant's own polling.
     mp.MediaPlayerEntity = type(
         "MediaPlayerEntity", (),
-        {"should_poll": property(lambda self: getattr(self, "_attr_should_poll", True))},
+        {"should_poll": property(lambda self: getattr(self, "_attr_should_poll", True)),
+         "async_write_ha_state": _record_write,
+         "entity_id": None, "hass": None},
     )
     mp.MediaType = types.SimpleNamespace(MUSIC="music")
     comp.media_player = mp
@@ -101,12 +110,16 @@ def _install_stubs():
         "native_max_value", "native_step", "available",
     )
 
+
     def _attr_property(attr):
         return property(lambda self: getattr(self, f"_attr_{attr}", None))
 
     num = _module("homeassistant.components.number")
     num.NumberEntity = type(
-        "NumberEntity", (), {a: _attr_property(a) for a in _ATTR_PROPS}
+        "NumberEntity", (),
+        {**{a: _attr_property(a) for a in _ATTR_PROPS},
+         "async_write_ha_state": _record_write,
+         "entity_id": None, "hass": None},
     )
     comp.number = num
 

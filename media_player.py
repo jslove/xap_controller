@@ -922,6 +922,22 @@ class XAPSource(MediaPlayerEntity):
         self._volume = _reported_level(self, gain, f"input {vinp['UNIT']}:{vinp['CHAN']}")
         return self._volume
 
+    def _publish(self):
+        """Push in-memory state into Home Assistant's state machine.
+
+        Needed on every setter because these entities do not self-poll, and
+        `entity_service_call` only writes state back after a service when `should_poll`
+        is true. Without it a setter updates `self._volume` and the state machine keeps
+        the old value until the next refresh tick - a dashboard slider springs back after
+        being dragged, and an automation that selects a source then reads it gets the
+        previous one.
+
+        Guarded because the setters are also called from _firstConnect and _startOffline,
+        and writing state before the entity is added raises.
+        """
+        if self.hass is not None and self.entity_id is not None:
+            self.async_write_ha_state()
+
     @handle_xap_exceptions
     async def async_set_volume_level(self, volume):
         """Set volume level, range 0..1.
@@ -942,6 +958,7 @@ class XAPSource(MediaPlayerEntity):
             if landed is None:
                 landed = result
         self._volume = volume if landed is None else landed
+        self._publish()
 
     @handle_xap_exceptions
     async def async_mute_volume(self, mute=2):
@@ -955,6 +972,7 @@ class XAPSource(MediaPlayerEntity):
                 lambda s=s: self._xapx00.setMute(s['CHAN'], group="I",
                                                  isMuted=self._isMuted, unitCode=s['UNIT'])
             )
+        self._publish()
 
     @handle_xap_exceptions
     async def _get_mute_status(self):
@@ -974,11 +992,13 @@ class XAPSource(MediaPlayerEntity):
             await self._firstConnect()
         await self.async_mute_volume(mute=0)
         self._state = STATE_ON
+        self._publish()
 
     async def async_turn_off(self):
         """Turn off media player."""
         await self.async_mute_volume(mute=1)
         self._state = STATE_OFF
+        self._publish()
 
     async def async_update(self):
         """Re-read level and mute from the unit.
@@ -1116,6 +1136,22 @@ class XAPZone(MediaPlayerEntity):
     async def async_update(self):
         pass  # can't be changed except by us, so can track state without calls
 
+    def _publish(self):
+        """Push in-memory state into Home Assistant's state machine.
+
+        Needed on every setter because these entities do not self-poll, and
+        `entity_service_call` only writes state back after a service when `should_poll`
+        is true. Without it a setter updates `self._volume` and the state machine keeps
+        the old value until the next refresh tick - a dashboard slider springs back after
+        being dragged, and an automation that selects a source then reads it gets the
+        previous one.
+
+        Guarded because the setters are also called from _firstConnect and _startOffline,
+        and writing state before the entity is added raises.
+        """
+        if self.hass is not None and self.entity_id is not None:
+            self.async_write_ha_state()
+
     @handle_xap_exceptions
     async def async_select_source(self, source):
         """Set the input source — blocking XAP calls run in executor."""
@@ -1152,6 +1188,7 @@ class XAPZone(MediaPlayerEntity):
                 self._poweroff_source = source
             cnt += 1
         self._active_source = source
+        self._publish()
 
     @handle_xap_exceptions
     async def _feeding_block(self, XOUT, XUNIT):
@@ -1262,6 +1299,7 @@ class XAPZone(MediaPlayerEntity):
         await self.async_select_source(self._poweroff_source)        
         await self.async_mute_volume(mute=0)
         self._state = STATE_ON
+        self._publish()
 
     async def async_turn_off(self):
         """Turn off zone"""
@@ -1274,6 +1312,7 @@ class XAPZone(MediaPlayerEntity):
         await self.async_mute_volume(mute=1)
         await self.async_select_source(SRC_OFF)
         self._state = STATE_OFF
+        self._publish()
 
     @handle_xap_exceptions
     async def async_mute_volume(self, mute=2):
@@ -1290,6 +1329,7 @@ class XAPZone(MediaPlayerEntity):
                     self._xapx00.setMute(XOUT, group="O", isMuted=int(muted), unitCode=XUNIT)
             )
         self._isMuted = bool(muted)
+        self._publish()
 
     @handle_xap_exceptions
     async def _get_mute_status(self):
@@ -1326,6 +1366,7 @@ class XAPZone(MediaPlayerEntity):
                 # surprising of the available wrong answers.
                 reported = landed
         self._volume = reported
+        self._publish()
 
     @handle_xap_exceptions
     async def _get_volume_level(self):

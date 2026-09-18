@@ -68,7 +68,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
         for index, inp in enumerate(inputs):
             entities.append(XAPSourceTrim(hass, entry, source_name, inp, index, len(inputs)))
 
-    async_add_entities(entities)
+    # update_before_add so the entity arrives with its real value and its real bounds.
+    # Without it it sits at `unknown` with the -65..+20 placeholder range until the first
+    # refresh tick, and a set in that window passes Home Assistant's range validation
+    # against placeholder bounds before being silently clamped against the real ceiling.
+    async_add_entities(entities, update_before_add=True)
     # Refreshed by the entry's own timer rather than this platform's default interval,
     # so trim reads queue with everything else on the one connection instead of
     # arriving on a second clock and meeting them at the lock.
@@ -227,3 +231,7 @@ class XAPSourceTrim(NumberEntity):
             target if landed is None or landed <= 0
             else round(self._max_db + 20.0 * math.log10(landed), 2)
         )
+        # This entity does not self-poll, and entity_service_call only writes state back
+        # after a service when should_poll is true - without this the slider springs back
+        # to the old value until the next refresh tick.
+        self.async_write_ha_state()

@@ -167,12 +167,27 @@ def test_the_entity_still_reports_input_0(component):
 
 # --- #31: the trim number entity ---------------------------------------------------
 
+class Collector:
+    """Stands in for async_add_entities, recording the update_before_add contract."""
+
+    def __init__(self):
+        self.entities = []
+        self.update_before_add = None
+
+    def __call__(self, entities, update_before_add=False):
+        self.entities.extend(entities)
+        self.update_before_add = update_before_add
+
+    def extend(self, entities):          # legacy call shape
+        self(entities)
+
+
 def build(number_platform, conn, sources):
-    added = []
+    added = Collector()
     entry = FakeEntry(sources)
     hass = FakeHass({entry.entry_id: conn})
-    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
-    return added
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added))
+    return added.entities
 
 
 def test_one_entity_per_input_channel(component, number_platform):
@@ -264,9 +279,9 @@ def test_the_connection_is_resolved_per_call_not_captured(component, number_plat
     old = FakeConn(gains={9: -6.0}, ceilings={9: 0.0})
     entry = FakeEntry({"Laptop": [9]})
     hass = FakeHass({entry.entry_id: old})
-    added = []
-    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
-    entity = added[0]
+    added = Collector()
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added))
+    entity = added.entities[0]
 
     new = FakeConn(gains={9: -9.0}, ceilings={9: 0.0})
     hass.data["xap_controller"][entry.entry_id] = new
@@ -338,19 +353,19 @@ def test_a_missing_connection_is_quiet_at_first(component, number_platform, capl
     """The number platform can set up before media_player fills hass.data."""
     entry = FakeEntry({"WiiM": [9]})
     hass = FakeHass({})                       # no connection registered yet
-    added = []
-    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
-    assert added[0].available is False
+    added = Collector()
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added))
+    assert added.entities[0].available is False
     assert not [r for r in caplog.records if r.levelname == "WARNING"]
 
 
 def test_a_connection_that_never_arrives_is_reported(component, number_platform, caplog):
     entry = FakeEntry({"WiiM": [9]})
     hass = FakeHass({})
-    added = []
-    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
+    added = Collector()
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added))
     for _ in range(number_platform.LOOKUP_MISSES_BEFORE_WARNING + 3):
-        added[0].available
+        added.entities[0].available
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert len(warnings) == 1, "expected exactly one, not one per attempt"
     assert "still no connection" in warnings[0].message
@@ -360,13 +375,34 @@ def test_the_miss_counter_resets_once_the_connection_appears(component, number_p
                                                              caplog):
     entry = FakeEntry({"WiiM": [9]})
     hass = FakeHass({})
-    added = []
-    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
-    added[0].available                                    # one miss during startup
+    added = Collector()
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added))
+    added.entities[0].available                                    # one miss during startup
     hass.data["xap_controller"][entry.entry_id] = FakeConn(gains={9: -6.0}, ceilings={9: 0.0})
-    assert added[0].available is True
+    assert added.entities[0].available is True
     hass.data["xap_controller"].clear()
     for _ in range(number_platform.LOOKUP_MISSES_BEFORE_WARNING - 1):
-        added[0].available
+        added.entities[0].available
     assert not [r for r in caplog.records if r.levelname == "WARNING"], \
         "the counter did not reset, so the warning came early"
+
+
+def test_the_entity_is_updated_before_it_is_added(component, number_platform):
+    """Otherwise it sits at `unknown` with placeholder bounds until the first tick, and a
+    set in that window validates against those bounds before being silently clamped."""
+    added = Collector()
+    entry = FakeEntry({"Laptop": [9]})
+    hass = FakeHass({entry.entry_id: FakeConn(gains={9: -6.0}, ceilings={9: 0.0})})
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added))
+    assert added.update_before_add is True
+
+
+def test_setting_a_trim_publishes_the_new_state(component, number_platform):
+    """should_poll is False, so nothing else writes state after number.set_value."""
+    conn = FakeConn(gains={9: -6.0}, ceilings={9: 0.0})
+    entity = build(number_platform, conn, {"Laptop": [9]})[0]
+    asyncio.run(entity.async_update())
+    before = getattr(entity, "state_writes", 0)
+    asyncio.run(entity.async_set_native_value(-3.0))
+    assert getattr(entity, "state_writes", 0) > before, \
+        "the slider would spring back to the old value until the next tick"
