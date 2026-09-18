@@ -24,6 +24,7 @@ import math
 
 from homeassistant.components.number import NumberEntity
 from homeassistant.const import EntityCategory
+from homeassistant.exceptions import ServiceValidationError
 
 from .config_flow import CONF_SOURCES
 from .media_player import (
@@ -121,10 +122,15 @@ class XAPSourceTrim(NumberEntity):
 
     @property
     def available(self):
+        # Only the "no connection for this entry" case is swallowed - that is a real
+        # state during setup and teardown. Anything else propagates so Home Assistant
+        # logs it: a bare `except Exception` here turns any mistake in this class into a
+        # permanently unavailable entity with nothing in the log to say why.
         try:
-            return bool(self._conn().connectionLive)
-        except Exception:  # noqa: BLE001 - no entry set up yet
+            conn = self._conn()
+        except ServiceValidationError:
             return False
+        return bool(conn.connectionLive)
 
     @handle_xap_exceptions
     async def async_update(self):
