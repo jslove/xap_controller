@@ -81,17 +81,24 @@ class FakeXAPX00:
     lists, which is the configuration the deprecation of `stereo` recommends.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, XAPType="XAP800", **kwargs):
         self.connectionLive = 1
         self.matrixGeo = 12
         self.stereo = 0
         self.convertDb = 1
         self.conn_id = "fake"
+        self.XAPType = XAPType
+        self.unit_types = {}
         self._lock = threading.Lock()
 
     def test_connection(self):
         self.connectionLive = 1
         return True
+
+    def discoverUnitType(self, unitCode):
+        """The chain is one unit, at id 0, of whatever type was configured."""
+        UNIT.calls.append(("discoverUnitType", None, str(unitCode)))
+        return self.XAPType if int(unitCode) == 0 else None
 
     def getMaxGain(self, channel, group="I", unitCode=0, stereo=1, **kwargs):
         UNIT.calls.append(("getMaxGain", group, str(channel)))
