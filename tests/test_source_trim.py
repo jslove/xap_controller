@@ -289,3 +289,42 @@ def test_the_write_pairs_under_stereo_mode(component, number_platform):
     asyncio.run(entity.async_update())
     asyncio.run(entity.async_set_native_value(-3.0))
     assert conn.set_stereo == [1], "stereo=0 was forced, halving a stereo pair"
+
+
+def test_the_window_stretches_to_hold_a_gain_below_it(component, number_platform):
+    """Found on hardware: an input at -4.19 dB against an unconfigured +20 dB ceiling.
+
+    The window hangs off the ceiling, so 0..+20 put the channel's own current value
+    below its own minimum - an entity reporting a number it would refuse to accept.
+    """
+    conn = FakeConn(gains={9: -4.19}, ceilings={9: 20.0})
+    entity = build(number_platform, conn, {"WiiM": [9]})[0]
+    asyncio.run(entity.async_update())
+    assert entity.native_value == pytest.approx(-4.19)
+    assert entity.native_min_value <= entity.native_value
+    assert entity.native_max_value == pytest.approx(20.0)
+
+
+def test_a_stretched_window_still_lets_the_value_be_restored(component, number_platform):
+    conn = FakeConn(gains={9: -4.19}, ceilings={9: 20.0})
+    entity = build(number_platform, conn, {"WiiM": [9]})[0]
+    asyncio.run(entity.async_update())
+    asyncio.run(entity.async_set_native_value(0.0))
+    asyncio.run(entity.async_set_native_value(-4.19))
+    assert conn.gains[9] == pytest.approx(-4.19)
+
+
+def test_the_window_never_goes_below_the_hardware_floor(component, number_platform):
+    conn = FakeConn(gains={9: -64.0}, ceilings={9: -60.0})
+    entity = build(number_platform, conn, {"WiiM": [9]})[0]
+    asyncio.run(entity.async_update())
+    assert entity.native_min_value >= number_platform.HW_MIN_GAIN_DB
+
+
+def test_a_configured_ceiling_still_gives_the_plain_window(component, number_platform):
+    """The normal case must not change: ceiling at the top, TRIM_RANGE_DB below it."""
+    conn = FakeConn(gains={9: -1.11}, ceilings={9: 10.89})
+    entity = build(number_platform, conn, {"Laptop": [9]})[0]
+    asyncio.run(entity.async_update())
+    assert entity.native_max_value == pytest.approx(10.89)
+    assert entity.native_min_value == pytest.approx(10.89 - number_platform.TRIM_RANGE_DB)

@@ -43,6 +43,9 @@ _LOGGER = logging.getLogger(__name__)
 # input should ever need - so a slip costs a couple of dB instead of a clipped input
 # stage or a silent channel.
 TRIM_RANGE_DB = 20.0
+
+# The unit's own gain floor; the window never goes below it.
+HW_MIN_GAIN_DB = -65.0
 TRIM_STEP_DB = 0.5
 
 
@@ -89,6 +92,7 @@ class XAPSourceTrim(NumberEntity):
         self._source_name = source_name
         self._input = inp
         self._max_db = None
+        self._initial_gain = None
         self._attr_native_value = None
         # Until the ceiling is known, offer the hardware range rather than a guess; it
         # narrows on the first update.
@@ -154,12 +158,33 @@ class XAPSourceTrim(NumberEntity):
         prop = await self._xap(
             lambda c: c.getPropGain(chan, group="I", unitCode=unit, stereo=0)
         )
-        self._attr_native_max_value = self._max_db
-        self._attr_native_min_value = self._max_db - TRIM_RANGE_DB
         # getPropGain is a ratio against MAXGAIN, so this is the absolute gain in dB.
-        self._attr_native_value = (
-            None if prop <= 0 else round(self._max_db + 20.0 * math.log10(prop), 2)
-        )
+        value = None if prop <= 0 else round(self._max_db + 20.0 * math.log10(prop), 2)
+        self._attr_native_max_value = self._max_db
+        if value is not None and self._initial_gain is None:
+            self._initial_gain = value
+        self._attr_native_min_value = self._floor()
+        self._attr_native_value = value
+
+    def _floor(self):
+        """The bottom of the trim window.
+
+        Normally the ceiling less TRIM_RANGE_DB, which is what "bound it near the
+        calibrated point" means when the ceiling has been set deliberately. On a channel
+        still at the +20 dB factory MAXGAIN it is not: found on a real unit with an input
+        trimmed to -4.19 dB against an unconfigured ceiling, where a window of 0..+20 put
+        the channel's own value below its own minimum - an entity reporting a number it
+        would refuse to accept.
+
+        So the window also stretches down to wherever the channel was when first read.
+        That anchor is latched rather than tracking the live value: tracking it ratchets,
+        because moving the trim up drags the floor up behind it and the original setting
+        can no longer be restored.
+        """
+        floor = self._max_db - TRIM_RANGE_DB
+        if self._initial_gain is not None:
+            floor = min(floor, self._initial_gain)
+        return max(floor, HW_MIN_GAIN_DB)
 
     @handle_xap_exceptions
     async def async_set_native_value(self, value):
@@ -168,7 +193,7 @@ class XAPSourceTrim(NumberEntity):
             await self.async_update()
         if self._max_db is None:
             return
-        target = min(max(float(value), self._max_db - TRIM_RANGE_DB), self._max_db)
+        target = min(max(float(value), self._floor()), self._max_db)
         chan, unit = self._input['CHAN'], self._input['UNIT']
         prop = 10.0 ** ((target - self._max_db) / 20.0)
         # No stereo=0 here, deliberately, unlike the reads above. On a connection in
