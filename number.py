@@ -155,9 +155,14 @@ class XAPSourceTrim(NumberEntity):
         target = min(max(float(value), self._max_db - TRIM_RANGE_DB), self._max_db)
         chan, unit = self._input['CHAN'], self._input['UNIT']
         prop = 10.0 ** ((target - self._max_db) / 20.0)
+        # No stereo=0 here, deliberately, unlike the reads above. On a connection in
+        # stereo mode the decorator writes chan+1 as well, and XAPSource's own volume
+        # write already behaves that way - so forcing stereo=0 would make this entity
+        # the one thing that trims half a pair and leaves the other side behind, without
+        # saying so. Reads keep stereo=0 because the decorator returns the first
+        # channel's value either way, so pairing them only doubles the traffic.
         landed = await self._xap(
-            lambda c: c.setPropGain(chan, prop, isAbsolute=1, group="I",
-                                    unitCode=unit, stereo=0)
+            lambda c: c.setPropGain(chan, prop, isAbsolute=1, group="I", unitCode=unit)
         )
         self._attr_native_value = (
             target if landed is None or landed <= 0

@@ -30,6 +30,7 @@ class FakeConn:
         self.gains = dict(gains or {})
         self.ceilings = dict(ceilings or {})
         self.set_calls = []
+        self.set_stereo = []
         self._lock = FakeLock()
 
     def _ceiling(self, channel):
@@ -43,6 +44,7 @@ class FakeConn:
 
     def setPropGain(self, channel, prop, isAbsolute=1, group="I", unitCode=0, stereo=1):
         self.set_calls.append((channel, prop))
+        self.set_stereo.append(stereo)
         self.gains[channel] = self._ceiling(channel) + 20.0 * math.log10(prop)
         return prop
 
@@ -272,3 +274,18 @@ def test_an_unparseable_source_does_not_stop_the_others(component, number_platfo
     conn = FakeConn(gains={9: -6.0}, ceilings={9: 0.0})
     entities = build(number_platform, conn, {"Bad": ["1:2:3:4:5"], "Laptop": [9]})
     assert [e.name for e in entities] == ["Source: Laptop trim"]
+
+
+def test_the_write_pairs_under_stereo_mode(component, number_platform):
+    """The one place stereo=0 must NOT be forced.
+
+    XAPSource's own volume write lets the @stereo decorator pair the channel, so forcing
+    stereo=0 here would make the trim entity the only thing that sets one half of a pair
+    and silently leaves the other behind - which is the configuration this was first
+    deployed onto, one channel per source with stereo on.
+    """
+    conn = FakeConn(gains={9: -6.0}, ceilings={9: 0.0})
+    entity = build(number_platform, conn, {"WiiM": [9]})[0]
+    asyncio.run(entity.async_update())
+    asyncio.run(entity.async_set_native_value(-3.0))
+    assert conn.set_stereo == [1], "stereo=0 was forced, halving a stereo pair"
