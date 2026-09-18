@@ -72,6 +72,10 @@ def test_the_listener_is_unsubscribed_on_unload(integration):
     assert not entry._listeners
 
 
-def test_setup_still_forwards_the_platform(integration):
+def test_setup_still_forwards_the_platforms(integration):
+    """Both platforms, in one call, so neither can be forgotten on a reload."""
     hass, entry = _setup(integration)
-    assert hass.config_entries.forwarded == [("e1", ("media_player",))]
+    assert len(hass.config_entries.forwarded) == 1
+    entry_id, platforms = hass.config_entries.forwarded[0]
+    assert entry_id == "e1"
+    assert set(platforms) == {"media_player", "number"}

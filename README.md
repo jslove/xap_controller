@@ -114,6 +114,34 @@ media_player:
 Setup Notes:
 For the sources, set the gain levels in the Clearone Console app.  They are very sensitive and should be calibrated to 0db.  Source gain is not adjustable from the UI by default.  If the Console app is not a practical way to set trim, tick **Allow source input gain to be set from the UI** on the Sources & Zones step and the source entities gain a level control.  Leave it off unless you need it: input trim is a calibration control, and anything that treats a `media_player` as a speaker — a broad `media_player.volume_set`, a voice assistant, a HomeKit/Alexa/Google bridge — will reach it once it looks like a volume.
 
+## Source input trim
+
+Each source input has a **trim** number entity, in dB, named `Source: <name> trim`. It is
+the supported way to set input gain.
+
+- **One per input channel**, so a stereo pair can be trimmed apart for channel balance.
+  On a single-input source there is just the one.
+- **In dB**, matching the Console app. `volume_level` is a fraction of that channel's
+  MAXGAIN, which is not a number anyone wants to type and silently means something
+  different whenever MAXGAIN moves.
+- **In the configuration category, and disabled by default.** Enable the one you need
+  from the entity's settings dialog. Home Assistant keeps config-category entities out of
+  voice assistants and most bridges, and being a `number` rather than a `media_player`
+  feature means `media_player.volume_set` cannot reach it at all - which matters because
+  the realistic accident is a broad "turn the volume down" targeting an area sweeping up
+  the inputs along with the speakers.
+- **Bounded** to the channel's MAXGAIN at the top and 20 dB below it at the bottom,
+  rather than the hardware's full -65...20 dB. A slip then costs a couple of dB instead
+  of a clipped input stage.
+
+Input trim is where headroom lives, and a wrong value is not audible as wrong: on one
+XAP800 a +10.89 dB input trim clipped the input stage and presented in an impulse
+measurement as a second loudspeaker six metres away.
+
+The older **`expose_source_gain`** option, which put input gain on the source's
+media_player volume slider, is **deprecated** and will be removed. It is the shape this
+entity exists to avoid.
+
 ## Raw command access (`xap_controller.send_command`)
 
 For hands-on work on the unit — reading `LABEL`, `MTRX`, `MAX`, or trying anything the

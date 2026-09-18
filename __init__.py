@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from .config_flow import CONF_PATH, CONF_SOURCES, CONF_ZONES
 
 DOMAIN = "xap_controller"
-PLATFORMS = [Platform.MEDIA_PLAYER]
+PLATFORMS = [Platform.MEDIA_PLAYER, Platform.NUMBER]
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -154,6 +154,41 @@ PROC_BLOCKS = "ABCDEFGH"
 # rounding in db2linear that makes an exactly-at-ceiling channel read as just over 1.0.
 GAIN_CLAMP_TOLERANCE_DB = 0.005
 
+
+def _reported_level(entity, prop, where):
+    """A proportional gain, clamped to the 0..1 Home Assistant accepts.
+
+    getPropGain is a ratio against the channel's MAXGAIN, so a channel whose GAIN sits
+    above its own ceiling reports more than 1.0 - the invalid state that showed up on an
+    output as 2.371, a slider at 237%. Nothing in the integration can produce it: the
+    setters cannot express a value above 1.0. It comes from outside - G-Ware, the front
+    panel, or a raw `MAX <ch> I` through send_command dropping a ceiling under a level
+    that was already there.
+
+    Clamping the report keeps the entity valid without writing to the unit, but a silent
+    clamp would recreate exactly the blindness that made the output case hard to find:
+    a channel reading 1.0 while it is really at 1.4 is still the wrong number, just a
+    less alarming one. So the first crossing is logged, and the latch resets when the
+    channel comes back under its ceiling so a recurrence is reported again.
+    """
+    try:
+        value = float(prop)
+    except (TypeError, ValueError):
+        return prop
+    if value > 1.0 + GAIN_CLAMP_TOLERANCE_DB:
+        if not entity._above_ceiling:
+            entity._above_ceiling = True
+            _LOGGER.warning(
+                "%s: %s is %.2f dB above its own MAXGAIN; reporting the ceiling. Nothing "
+                "in this integration can set a level above it, so something else did - "
+                "G-Ware, the front panel, or a raw MAX write.",
+                entity, where, 20.0 * math.log10(value))
+        return 1.0
+    if entity._above_ceiling and value <= 1.0 + GAIN_CLAMP_TOLERANCE_DB:
+        entity._above_ceiling = False
+        _LOGGER.info("%s: %s is back under its MAXGAIN", entity, where)
+    return min(value, 1.0)
+
 SUPPORT_XAP_ZONE = (
     MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
     MPEF.TURN_ON | MPEF.TURN_OFF |
@@ -175,6 +210,48 @@ SUPPORT_XAP_SOURCE = (
 # purpose, but a broad "turn the volume down" targeting an area sweeping up the inputs
 # along with the speakers.
 SUPPORT_XAP_SOURCE_WITH_GAIN = SUPPORT_XAP_SOURCE | MPEF.VOLUME_SET
+
+
+def parse_source_specs(srcs):
+    """Channel specs -> a list of input dicts.
+
+    Module level so the number platform reads the same parser the media_player entity
+    does. Two copies of this would drift, and a spec one accepted and the other did not
+    is a crash at setup rather than a config error.
+    """
+    inputs = []
+    for src in srcs:
+        inpdict = {'UNIT': 0, 'CHAN': None, 'BUS': None, 'BUSGRP': 'E', 'INPGRP': 'I'}
+        if issubclass(type(src), int):
+            inpdict['CHAN'] = src
+        elif issubclass(type(src), str):
+            if ":" in src:
+                comps = src.count(':')
+                if comps == 1:
+                    inpdict['UNIT'], inpdict['CHAN'] = src.split(":")
+                elif comps == 2:
+                    # BUSGRP already defaults to 'E' in inpdict above.
+                    inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'] = src.split(":")
+                elif comps == 3:
+                    inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'], inpdict['BUSGRP'] = src.split(":")
+                else:
+                    # Anything longer used to match no branch at all, leaving CHAN as
+                    # None until int(None) raised TypeError further down.
+                    raise Exception('Invalid Input String')
+                try:
+                    inpdict['CHAN'] = int(inpdict['CHAN'])
+                    inpdict['UNIT'] = int(inpdict['UNIT'])
+                except (TypeError, ValueError):
+                    raise Exception('Invalid Input String')
+            elif src.isdigit():
+                inpdict['CHAN'] = int(src)
+            else:
+                raise Exception('Invalid Input String')
+        else:
+            # shouldn't be able to get here
+            raise Exception('Invalid Source Input config format')
+        inputs.append(inpdict)
+    return inputs
 
 
 def handle_xap_exceptions(func):
@@ -558,6 +635,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "a zone of [3, 4] with stereo off. See issue #23."
         )
     expose_gain = bool(entry.data.get(CONF_EXPOSE_SOURCE_GAIN, False))
+    if expose_gain:
+        # Superseded by the per-channel trim number entities, which reach the same gain
+        # without making it look like a volume to automations, Assist and the bridges.
+        _LOGGER.warning(
+            "The 'expose_source_gain' option is deprecated and will be removed in a "
+            "future release. Enable the 'Source: <name> trim' number entity for the "
+            "channel you want to adjust instead - it is per channel, in dB, and out of "
+            "reach of media_player.volume_set."
+        )
 
     # XAPX00.__init__ calls test_connection() internally, which uses
     # loop.run_until_complete() for telnet.  That must not run on HA's event
@@ -628,6 +714,10 @@ class XAPSource(MediaPlayerEntity):
     Represents one source
     """
 
+    # Latched by _reported_level so a channel sitting above its own MAXGAIN is
+    # logged on the first crossing rather than on every poll.
+    _above_ceiling = False
+
     def __init__(self, hass, xapconn, source_name, source_inputs, unitCode=0,
                  expose_gain=False):
         """Initialise the XAPX00 source pseudo-device"""
@@ -682,8 +772,12 @@ class XAPSource(MediaPlayerEntity):
     async def _firstConnect(self):
         if self._first_connect:
             return
+        # Read only. This used to write the level straight back "to make sure synced",
+        # which on a multi-input source wrote input 0's trim to every other input - so a
+        # pair deliberately trimmed apart for channel balance lost that on every startup,
+        # silently, because the write succeeded and the entity agreed with what it wrote.
+        # The unit is the authority at startup; there is nothing here to sync it to.
         self._volume = await self._get_volume_level()
-        await self.async_set_volume_level(self._volume)  # make sure synced
         await self._get_mute_status()
         if self._isMuted:
             self._state = STATE_OFF
@@ -701,37 +795,7 @@ class XAPSource(MediaPlayerEntity):
 
     def parse_source(self, srcs):
         "Split into input unit, input #, expansion bus, expansion bus group"
-        for src in srcs:
-            inpdict={'UNIT':0,'CHAN':None,'BUS':None, 'BUSGRP':'E', 'INPGRP':'I'}
-            if issubclass(type(src), int):
-                inpdict['CHAN'] = src
-            elif issubclass(type(src), str):
-                if ":" in src:
-                    comps = src.count(':')
-                    if comps == 1:
-                        inpdict['UNIT'], inpdict['CHAN']  =  src.split(":")
-                    elif comps == 2:
-                        # BUSGRP already defaults to 'E' in inpdict above.
-                        inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'] = src.split(":")
-                    elif comps == 3:
-                        inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'], inpdict['BUSGRP'] = src.split(":")
-                    else:
-                        # Anything longer used to match no branch at all, leaving CHAN as
-                        # None until int(None) raised TypeError further down.
-                        raise Exception('Invalid Input String')
-                    try:
-                        inpdict['CHAN'] = int(inpdict['CHAN'])
-                        inpdict['UNIT'] = int(inpdict['UNIT'])
-                    except (TypeError, ValueError):
-                        raise Exception('Invalid Input String')
-                elif src.isdigit():
-                    inpdict['CHAN'] = int(src)
-                else:
-                    raise Exception('Invalid Input String')
-            else:
-                # shouldn't be able to get here
-                raise Exception('Invalid Source Input config format')
-            self._inputs.append(inpdict)
+        self._inputs.extend(parse_source_specs(srcs))
         return
 
     def getSource(self, outUnit, srcNum=0):
@@ -778,7 +842,7 @@ class XAPSource(MediaPlayerEntity):
         gain = await self._xap(
             lambda: self._xapx00.getPropGain(vinp['CHAN'], group="I", unitCode=vinp['UNIT'])
         )
-        self._volume = gain
+        self._volume = _reported_level(self, gain, f"input {vinp['UNIT']}:{vinp['CHAN']}")
         return self._volume
 
     @handle_xap_exceptions
@@ -860,6 +924,10 @@ class XAPZone(MediaPlayerEntity):
     """
     Represents one or more XAP outputs, either mono or stereo
     """
+
+    # Latched by _reported_level so a channel sitting above its own MAXGAIN is
+    # logged on the first crossing rather than on every poll.
+    _above_ceiling = False
     def __init__(self, hass, xapconn, sources, zone_name, outputs, unitCode=0):
         """Initialise the XAPX00 zone pseudo-device"""
         self.hass = hass
@@ -1186,7 +1254,7 @@ class XAPZone(MediaPlayerEntity):
         gain = await self._xap(
             lambda: self._xapx00.getPropGain(XOUT, group="O", unitCode=XUNIT)
         )
-        self._volume = gain
+        self._volume = _reported_level(self, gain, f"output {XUNIT}:{XOUT}")
         return self._volume
 
     async def _sync_volume_level(self):

@@ -42,7 +42,8 @@ def _install_stubs():
     const.STATE_OFF = "off"
     const.STATE_ON = "on"
     const.CONF_NAME = "name"
-    const.Platform = types.SimpleNamespace(MEDIA_PLAYER="media_player")
+    const.Platform = types.SimpleNamespace(MEDIA_PLAYER="media_player", NUMBER="number")
+    const.EntityCategory = types.SimpleNamespace(CONFIG="config", DIAGNOSTIC="diagnostic")
 
     core = _module("homeassistant.core")
     core.HomeAssistant = type("HomeAssistant", (), {})
@@ -70,6 +71,24 @@ def _install_stubs():
     mp.MediaPlayerEntity = type("MediaPlayerEntity", (), {})
     mp.MediaType = types.SimpleNamespace(MUSIC="music")
     comp.media_player = mp
+
+    # Home Assistant's Entity exposes every `_attr_x` as a read-only `x` property, and
+    # the component relies on that rather than defining each one. Reproduce it for the
+    # handful the trim entity uses, or every read comes back AttributeError.
+    _ATTR_PROPS = (
+        "name", "unique_id", "entity_category", "entity_registry_enabled_default",
+        "native_value", "native_unit_of_measurement", "native_min_value",
+        "native_max_value", "native_step", "available",
+    )
+
+    def _attr_property(attr):
+        return property(lambda self: getattr(self, f"_attr_{attr}", None))
+
+    num = _module("homeassistant.components.number")
+    num.NumberEntity = type(
+        "NumberEntity", (), {a: _attr_property(a) for a in _ATTR_PROPS}
+    )
+    comp.number = num
 
     mp_const = _module("homeassistant.components.media_player.const")
 
@@ -150,3 +169,11 @@ def integration():
     import importlib
 
     return importlib.import_module(_PKG)
+
+
+@pytest.fixture(scope="session")
+def number_platform():
+    import importlib
+
+    importlib.import_module(_PKG)
+    return importlib.import_module(f"{_PKG}.number")
