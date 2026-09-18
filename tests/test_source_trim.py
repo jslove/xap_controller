@@ -332,3 +332,41 @@ def test_a_configured_ceiling_still_gives_the_plain_window(component, number_pla
     asyncio.run(entity.async_update())
     assert entity.native_max_value == pytest.approx(10.89)
     assert entity.native_min_value == pytest.approx(10.89 - number_platform.TRIM_RANGE_DB)
+
+
+def test_a_missing_connection_is_quiet_at_first(component, number_platform, caplog):
+    """The number platform can set up before media_player fills hass.data."""
+    entry = FakeEntry({"WiiM": [9]})
+    hass = FakeHass({})                       # no connection registered yet
+    added = []
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
+    assert added[0].available is False
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_a_connection_that_never_arrives_is_reported(component, number_platform, caplog):
+    entry = FakeEntry({"WiiM": [9]})
+    hass = FakeHass({})
+    added = []
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
+    for _ in range(number_platform.LOOKUP_MISSES_BEFORE_WARNING + 3):
+        added[0].available
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1, "expected exactly one, not one per attempt"
+    assert "still no connection" in warnings[0].message
+
+
+def test_the_miss_counter_resets_once_the_connection_appears(component, number_platform,
+                                                             caplog):
+    entry = FakeEntry({"WiiM": [9]})
+    hass = FakeHass({})
+    added = []
+    asyncio.run(number_platform.async_setup_entry(hass, entry, added.extend))
+    added[0].available                                    # one miss during startup
+    hass.data["xap_controller"][entry.entry_id] = FakeConn(gains={9: -6.0}, ceilings={9: 0.0})
+    assert added[0].available is True
+    hass.data["xap_controller"].clear()
+    for _ in range(number_platform.LOOKUP_MISSES_BEFORE_WARNING - 1):
+        added[0].available
+    assert not [r for r in caplog.records if r.levelname == "WARNING"], \
+        "the counter did not reset, so the warning came early"

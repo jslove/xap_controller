@@ -49,6 +49,10 @@ TRIM_RANGE_DB = 20.0
 HW_MIN_GAIN_DB = -65.0
 TRIM_STEP_DB = 0.5
 
+# Consecutive failed connection lookups before saying so out loud. More than the
+# handful a normal startup produces, few enough that a real failure is reported.
+LOOKUP_MISSES_BEFORE_WARNING = 5
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """One trim entity per input channel."""
@@ -90,7 +94,7 @@ class XAPSourceTrim(NumberEntity):
     # flow to enable it globally and another trip to put it back.
     _attr_entity_registry_enabled_default = False
     _attr_should_poll = False
-    _lookup_failed = False
+    _misses = 0
 
     def __init__(self, hass, entry, source_name, inp, index, of_many):
         self.hass = hass
@@ -140,16 +144,24 @@ class XAPSourceTrim(NumberEntity):
         try:
             conn = self._conn()
         except ServiceValidationError as err:
-            # Said once rather than every poll. An entity that cannot find its
-            # connection is otherwise just permanently unavailable with no reason given,
-            # which is a miserable thing to debug from the outside.
-            if not self._lookup_failed:
-                self._lookup_failed = True
-                _LOGGER.warning("%s: no connection for entry %s (%s); keys present: %s",
-                                self, self._entry_id, err,
-                                sorted(self.hass.data.get(DOMAIN, {})))
+            # Not on the first miss. This platform can set up before media_player has put
+            # the connection into hass.data - observed on every restart of a real
+            # install, reported as "keys present: []" and resolved by the next tick. That
+            # is a normal startup order, not a fault, and warning about it trains people
+            # to ignore the message that matters.
+            #
+            # Still said eventually, because an entity that is permanently unavailable
+            # with nothing in the log is a miserable thing to debug from the outside.
+            self._misses += 1
+            if self._misses == LOOKUP_MISSES_BEFORE_WARNING:
+                _LOGGER.warning(
+                    "%s: still no connection for entry %s after %s attempts (%s); "
+                    "keys present: %s", self, self._entry_id, self._misses, err,
+                    sorted(self.hass.data.get(DOMAIN, {})))
+            else:
+                _LOGGER.debug("%s: no connection yet for entry %s", self, self._entry_id)
             return False
-        self._lookup_failed = False
+        self._misses = 0
         return bool(conn.connectionLive)
 
     @handle_xap_exceptions
