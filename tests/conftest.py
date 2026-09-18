@@ -61,13 +61,32 @@ def _install_stubs():
     exc.ServiceValidationError = ServiceValidationError
 
     helpers = _module("homeassistant.helpers")
+
+    # Records the registered callback and interval, and hands back an unsub the caller
+    # is expected to pass to entry.async_on_unload.
+    event = _module("homeassistant.helpers.event")
+
+    def _async_track_time_interval(hass, action, interval, **kwargs):
+        event.tracked.append((action, interval))
+        return lambda: event.unsubscribed.append(action)
+
+    event.tracked = []
+    event.unsubscribed = []
+    event.async_track_time_interval = _async_track_time_interval
+    helpers.event = event
+
     cv = _module("homeassistant.helpers.config_validation")
     cv.string = str
     helpers.config_validation = cv
 
     comp = _module("homeassistant.components")
     mp = _module("homeassistant.components.media_player")
-    mp.MediaPlayerEntity = type("MediaPlayerEntity", (), {})
+    # Entity.should_poll defaults True and is backed by _attr_should_poll, which is
+    # how an entity opts out of Home Assistant's own polling.
+    mp.MediaPlayerEntity = type(
+        "MediaPlayerEntity", (),
+        {"should_poll": property(lambda self: getattr(self, "_attr_should_poll", True))},
+    )
     mp.MediaType = types.SimpleNamespace(MUSIC="music")
     comp.media_player = mp
 
