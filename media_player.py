@@ -120,6 +120,7 @@ import json
 import math
 import shlex
 import threading
+from datetime import timedelta
 
 import voluptuous as vol
 
@@ -130,6 +131,7 @@ from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 from XAPX00 import __version__ as XAPVER, XAPX00, XAPCommError, XAPRespError
 
 from .config_flow import (
@@ -144,6 +146,20 @@ DOMAIN = 'xap_controller'
 _LOGGER = logging.getLogger(__name__)
 
 SRC_OFF = 'Off'
+
+# How often entity state is re-read, by transport.
+#
+# Not a module-level SCAN_INTERVAL, because that is read once by the platform and is
+# therefore global to media_player: a serial entry and a telnet entry in one install
+# cannot have different values, and they want different ones. Serial is a single port
+# under one lock, so every poll competes with real commands and 30s is plenty for levels
+# that change on human timescales. Telnet has no such contention, so it can stay
+# responsive.
+SCAN_INTERVALS = {
+    "serial": timedelta(seconds=30),
+    "telnet": timedelta(seconds=10),
+}
+DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
 
 # Processing blocks, addressed by letter rather than number. A zone can be fed
 # input -> processing -> output, which leaves no direct input/output crosspoint for
@@ -613,6 +629,44 @@ async def _apply_max_gain(hass, xapconn, raw):
             _LOGGER.exception("Failed setting MAXGAIN on unit %s output %s", unit, chan)
 
 
+def _register_polling(hass, entry, entities):
+    """Drive entity updates from one timer instead of Home Assistant's per-platform poll.
+
+    The entities set `_attr_should_poll = False` and are refreshed from here, so the
+    period can come from the entry's own transport rather than a module constant.
+
+    Sequential, not gathered: every update ends up behind the same connection lock, so
+    issuing them together would only pile executor threads against it. A tick that is
+    still running when the next one fires is skipped rather than queued - on a slow or
+    half-dead link, overlapping ticks are how a backlog turns into a stall.
+    """
+    conn_type = entry.data.get(CONF_CONNECTION_TYPE, "serial")
+    interval = SCAN_INTERVALS.get(conn_type, DEFAULT_SCAN_INTERVAL)
+    in_progress = {"now": False}
+
+    async def _refresh(_now):
+        if in_progress["now"]:
+            _LOGGER.debug("refresh still running after %s; skipping this tick", interval)
+            return
+        in_progress["now"] = True
+        try:
+            for entity in entities:
+                if entity.hass is None or entity.entity_id is None:
+                    continue  # not added yet
+                try:
+                    await entity.async_update()
+                except Exception:  # noqa: BLE001 - one bad entity must not stop the rest
+                    _LOGGER.exception("Failed refreshing %s", entity)
+                    continue
+                entity.async_write_ha_state()
+        finally:
+            in_progress["now"] = False
+
+    entry.async_on_unload(async_track_time_interval(hass, _refresh, interval))
+    _LOGGER.debug("Refreshing %s entities every %s over %s",
+                  len(entities), interval, conn_type)
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up XAP Controller media player entities from a config entry."""
     sources = json.loads(entry.data[CONF_SOURCES])
@@ -706,7 +760,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     await _prewarm_max_gain(hass, xapconn, zone_objs)
 
-    async_add_entities(source_objs + zone_objs)
+    entities = source_objs + zone_objs
+    async_add_entities(entities)
+    _register_polling(hass, entry, entities)
 
 
 class XAPSource(MediaPlayerEntity):
@@ -717,6 +773,9 @@ class XAPSource(MediaPlayerEntity):
     # Latched by _reported_level so a channel sitting above its own MAXGAIN is
     # logged on the first crossing rather than on every poll.
     _above_ceiling = False
+    # Refreshed by _register_polling, so the period can follow the entry's
+    # transport instead of one module-wide constant shared by both.
+    _attr_should_poll = False
 
     def __init__(self, hass, xapconn, source_name, source_inputs, unitCode=0,
                  expose_gain=False):
@@ -928,6 +987,10 @@ class XAPZone(MediaPlayerEntity):
     # Latched by _reported_level so a channel sitting above its own MAXGAIN is
     # logged on the first crossing rather than on every poll.
     _above_ceiling = False
+    # Refreshed by _register_polling, so the period can follow the entry's
+    # transport instead of one module-wide constant shared by both.
+    _attr_should_poll = False
+
     def __init__(self, hass, xapconn, sources, zone_name, outputs, unitCode=0):
         """Initialise the XAPX00 zone pseudo-device"""
         self.hass = hass
