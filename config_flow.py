@@ -70,7 +70,9 @@ def _validate_unit_types(text: str) -> dict:
 
     The command prefix is "#<type><id>" and the type is per MODEL - an 880T answers
     "#D<id>", a plain 880 "#1<id>" - so a chain that mixes models needs a type per
-    unit. This names the exceptions; everything else keeps the device type above.
+    unit. Saving sources & zones fills this in from the chain (_discover_unit_types),
+    so by hand it is only for a unit that is off at the time: the entry is the first
+    guess tried, and what the unit is addressed as once it comes back.
     """
     if not text or not text.strip():
         return {}
@@ -179,6 +181,59 @@ def _validate_sources_zones(json_str: str, label: str) -> dict:
     return data
 
 
+def _referenced_units(sources: dict, zones: dict) -> list:
+    """Every unit id the sources and zones address.
+
+    A bare channel is unit 0; "<unit>:..." names the unit. Malformed specs are
+    skipped here - the validators and entity constructors report them.
+    """
+    units = set()
+    for specs in list(sources.values()) + list(zones.values()):
+        for spec in specs:
+            if isinstance(spec, int):
+                units.add(0)
+            elif isinstance(spec, str):
+                head, sep, _ = spec.partition(":")
+                units.add(int(head) if sep and head.strip().isdigit() else 0)
+    return sorted(units)
+
+
+def _unit_types_text(unit_types: dict) -> str:
+    """{2: "CP880"} -> "2:CP880", the field's own format."""
+    return ", ".join(f"{u}:{t}" for u, t in sorted(unit_types.items()))
+
+
+def _discover_unit_types(data: dict, units) -> str:
+    """Ask each unit the sources and zones use what model it is; return the field text.
+
+    This is what makes the "Unit types" field fill itself in. The command prefix is
+    per model - an 880T is #D<id>, a plain 880 is #1<id> - and a unit is silent under
+    any other model's prefix, so rather than have the operator know that, every unit
+    the config addresses is asked VER under each prefix. The configured type, or the
+    field's own entry, is tried first, so a correct description costs one command
+    per unit and a wrong one a timeout per model. A unit that answers nothing (off,
+    off the expansion bus, at another id) keeps whatever the field said: discovery
+    adds, it does not forget. Runs in the executor.
+    """
+    known = dict(_validate_unit_types(data.get(CONF_UNIT_TYPES, "")))
+    xapconn = _build_xapconn(data)
+    if not xapconn.test_connection():
+        _LOGGER.warning("unit discovery skipped: not connected")
+        return _unit_types_text(known)
+    default = data.get(CONF_TYPE, "XAP800")
+    for unit in units:
+        found = xapconn.discoverUnitType(unit)
+        if found is None:
+            _LOGGER.warning("unit %s did not answer as any model; its sources and "
+                            "zones will not work until it does", unit)
+        elif found == default:
+            known.pop(unit, None)  # the device type covers it
+        else:
+            known[unit] = found
+    _LOGGER.info("unit discovery: %s -> unit types %r", units, _unit_types_text(known))
+    return _unit_types_text(known)
+
+
 def _build_xapconn(data):
     """Instantiate an XAPX00 connection object from config data (runs in executor)."""
     from XAPX00 import XAPX00
@@ -209,7 +264,23 @@ def _build_xapconn(data):
     return xapconn
 
 
-class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class _DiscoveryMixin:
+    """Fill in "Unit types" from the chain itself, for the units the config addresses."""
+
+    async def _discover(self, data):
+        units = _referenced_units(
+            json.loads(data[CONF_SOURCES]), json.loads(data[CONF_ZONES])
+        )
+        try:
+            return await self.hass.async_add_executor_job(
+                _discover_unit_types, data, units
+            )
+        except Exception:  # noqa: BLE001 - discovery is a convenience, never a blocker
+            _LOGGER.exception("unit discovery failed; keeping the field as entered")
+            return data.get(CONF_UNIT_TYPES, "")
+
+
+class XapControllerConfigFlow(_DiscoveryMixin, config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for XAP Controller."""
 
     VERSION = 1
@@ -349,6 +420,7 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if not errors:
                 data = {**self._connection_data, **user_input}
+                data[CONF_UNIT_TYPES] = await self._discover(data)
                 title = self._connection_data.get(
                     CONF_NAME,
                     self._connection_data.get(
@@ -399,7 +471,7 @@ class XapControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return XapControllerOptionsFlow(config_entry)
 
 
-class XapControllerOptionsFlow(config_entries.OptionsFlow):
+class XapControllerOptionsFlow(_DiscoveryMixin, config_entries.OptionsFlow):
     """Handle options (edit after setup)."""
 
     def __init__(self, config_entry):
@@ -539,6 +611,7 @@ class XapControllerOptionsFlow(config_entries.OptionsFlow):
 
             if not errors:
                 new_data = {**self._entry.data, **self._connection_data, **user_input}
+                new_data[CONF_UNIT_TYPES] = await self._discover(new_data)
                 self.hass.config_entries.async_update_entry(self._entry, data=new_data)
                 return self.async_create_entry(title="", data={})
 

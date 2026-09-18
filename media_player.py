@@ -342,6 +342,25 @@ def async_release_connection(hass, entry):
                      DOMAIN, SERVICE_SEND_COMMAND)
 
 
+async def _discover_unit_types(hass, xapconn, sources, zones):
+    """Ask each referenced unit what model it is, so a mixed chain just works.
+
+    The command prefix is per model (an 880T is #D<id>, a plain 880 is #1<id>),
+    and a unit is silent under any other model's prefix. Rather than have the
+    operator know that, every unit the config names is asked VER at setup; the
+    configured type (or the "Unit types" field) is tried first, so a correctly
+    described chain costs one command per unit. A unit that answers nothing is
+    logged and left alone - it is off, off the expansion bus, or at another id,
+    and its zones will report failure the same way they always have.
+    """
+    from .config_flow import _referenced_units
+    for unit in _referenced_units(sources, zones):
+        found = await hass.async_add_executor_job(xapconn.discoverUnitType, unit)
+        if found is None:
+            _LOGGER.warning("unit %s did not answer as any model; its zones and "
+                            "sources will not work until it does", unit)
+
+
 async def _prewarm_max_gain(hass, xapconn, zones):
     """Read every zone output channel's MAXGAIN once, to seed XAPX00's cache.
 
@@ -602,6 +621,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = xapconn
     _register_send_command(hass)
+    if connected:
+        await _discover_unit_types(hass, xapconn, sources, zones)
     await _apply_max_gain(hass, xapconn, entry.data.get(CONF_MAX_GAIN, ""))
 
     source_objs = []

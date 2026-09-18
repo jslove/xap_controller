@@ -6,7 +6,7 @@
         "data": {
           "name": "Name",
           "XAPType": "Device type",
-          "unit_types": "Unit types (optional): unit:type for any chained unit of a different model, e.g. 2:CP880",
+          "unit_types": "Unit types: unit:type for any chained unit of a different model, e.g. 2:CP880. Filled in automatically when sources and zones are saved, from the units they use; enter it by hand only for a unit that is off right now.",
           "stereo": "Stereo mode (deprecated)",
           "connection_type": "Connection type"
         }
@@ -58,7 +58,7 @@
         "data": {
           "name": "Name",
           "XAPType": "Device type",
-          "unit_types": "Unit types (optional): unit:type for any chained unit of a different model, e.g. 2:CP880",
+          "unit_types": "Unit types: unit:type for any chained unit of a different model, e.g. 2:CP880. Filled in automatically when sources and zones are saved, from the units they use; enter it by hand only for a unit that is off right now.",
           "stereo": "Stereo mode (deprecated)",
           "connection_type": "Connection type"
         }
