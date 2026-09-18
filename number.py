@@ -32,6 +32,7 @@ from .media_player import (
     _connection_for,
     handle_xap_exceptions,
     parse_source_specs,
+    register_for_polling,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,6 +65,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
             entities.append(XAPSourceTrim(hass, entry, source_name, inp, index, len(inputs)))
 
     async_add_entities(entities)
+    # Refreshed by the entry's own timer rather than this platform's default interval,
+    # so trim reads queue with everything else on the one connection instead of
+    # arriving on a second clock and meeting them at the lock.
+    register_for_polling(hass, entry, entities)
 
 
 class XAPSourceTrim(NumberEntity):
@@ -84,6 +89,7 @@ class XAPSourceTrim(NumberEntity):
     # entity's own settings dialog, per channel, rather than a trip through the config
     # flow to enable it globally and another trip to put it back.
     _attr_entity_registry_enabled_default = False
+    _attr_should_poll = False
     _lookup_failed = False
 
     def __init__(self, hass, entry, source_name, inp, index, of_many):

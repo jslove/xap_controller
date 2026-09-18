@@ -96,6 +96,7 @@ def _install_stubs():
     # handful the trim entity uses, or every read comes back AttributeError.
     _ATTR_PROPS = (
         "name", "unique_id", "entity_category", "entity_registry_enabled_default",
+        "should_poll",
         "native_value", "native_unit_of_measurement", "native_min_value",
         "native_max_value", "native_step", "available",
     )

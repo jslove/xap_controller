@@ -50,8 +50,14 @@ class FakeEntity:
         return self.name
 
 
-def register(component, entry, entities):
-    component._register_polling(object(), entry, entities)
+class FakeHass:
+    def __init__(self):
+        self.data = {}
+
+
+def register(component, entry, entities, hass=None):
+    hass = hass or FakeHass()
+    component.register_for_polling(hass, entry, entities)
     import homeassistant.helpers.event as event
 
     action, interval = event.tracked[-1]
@@ -191,3 +197,68 @@ def test_a_failing_tick_reopens_the_gate_too(component):
 @pytest.mark.parametrize("cls_name", ["XAPSource", "XAPZone"])
 def test_entities_do_not_self_poll(component, cls_name):
     assert getattr(component, cls_name)._attr_should_poll is False
+
+
+# --- one timer per entry, fed by every platform --------------------------------------
+
+def test_a_second_platform_joins_the_same_timer(component):
+    """Two timers on one unit would tick independently and meet at the lock."""
+    import homeassistant.helpers.event as event
+
+    hass, entry = FakeHass(), FakeEntry("serial")
+    media = [FakeEntity("zone")]
+    trims = [FakeEntity("trim")]
+    component.register_for_polling(hass, entry, media)
+    component.register_for_polling(hass, entry, trims)
+    assert len(event.tracked) == 1, "a second timer was started"
+
+    action, _ = event.tracked[0]
+    asyncio.run(action(None))
+    assert media[0].updates == 1 and trims[0].updates == 1
+
+
+def test_entities_registered_after_the_timer_started_are_picked_up(component):
+    hass, entry = FakeHass(), FakeEntry("serial")
+    first = FakeEntity("first")
+    action, _ = register(component, entry, [first], hass=hass)
+    late = FakeEntity("late")
+    component.register_for_polling(hass, entry, [late])
+    asyncio.run(action(None))
+    assert late.updates == 1
+
+
+def test_separate_entries_get_separate_timers(component):
+    """Different units, different connections - they must not share a tick."""
+    import homeassistant.helpers.event as event
+
+    hass = FakeHass()
+    component.register_for_polling(hass, FakeEntry("serial", "e1"), [FakeEntity("a")])
+    component.register_for_polling(hass, FakeEntry("telnet", "e2"), [FakeEntity("b")])
+    assert len(event.tracked) == 2
+    assert {i for _, i in event.tracked} == {timedelta(seconds=30), timedelta(seconds=10)}
+
+
+def test_unloading_clears_the_entry_from_the_store(component):
+    """Otherwise a reload appends to the old list and refreshes dead entities."""
+    hass, entry = FakeHass(), FakeEntry("serial")
+    register(component, entry, [FakeEntity("a")], hass=hass)
+    assert hass.data[component.POLL_KEY]
+    for unsub in entry.on_unload:
+        unsub()
+    assert not hass.data[component.POLL_KEY]
+
+
+def test_a_reload_starts_a_fresh_timer_rather_than_appending(component):
+    import homeassistant.helpers.event as event
+
+    hass, entry = FakeHass(), FakeEntry("serial")
+    old = FakeEntity("old")
+    register(component, entry, [old], hass=hass)
+    for unsub in entry.on_unload:
+        unsub()
+
+    new = FakeEntity("new")
+    action, _ = register(component, entry, [new], hass=hass)
+    assert len(event.tracked) == 2
+    asyncio.run(action(None))
+    assert new.updates == 1 and old.updates == 0, "the dead entity was still refreshed"

@@ -64,9 +64,13 @@ class FakeHass:
 
 
 class FakeEntry:
-    def __init__(self, sources, entry_id="e1"):
+    def __init__(self, sources, entry_id="e1", conn_type="serial"):
         self.entry_id = entry_id
-        self.data = {"sources": json.dumps(sources)}
+        self.data = {"sources": json.dumps(sources), "connection_type": conn_type}
+        self.on_unload = []
+
+    def async_on_unload(self, fn):
+        self.on_unload.append(fn)
 
 
 async def _run(fn):
