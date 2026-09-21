@@ -120,6 +120,7 @@ import json
 import math
 import shlex
 import threading
+from datetime import timedelta
 
 import voluptuous as vol
 
@@ -130,6 +131,7 @@ from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 from XAPX00 import __version__ as XAPVER, XAPX00, XAPCommError, XAPRespError
 
 from .config_flow import (
@@ -145,6 +147,20 @@ _LOGGER = logging.getLogger(__name__)
 
 SRC_OFF = 'Off'
 
+# How often entity state is re-read, by transport.
+#
+# Not a module-level SCAN_INTERVAL, because that is read once by the platform and is
+# therefore global to media_player: a serial entry and a telnet entry in one install
+# cannot have different values, and they want different ones. Serial is a single port
+# under one lock, so every poll competes with real commands and 30s is plenty for levels
+# that change on human timescales. Telnet has no such contention, so it can stay
+# responsive.
+SCAN_INTERVALS = {
+    "serial": timedelta(seconds=30),
+    "telnet": timedelta(seconds=10),
+}
+DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
+
 # Processing blocks, addressed by letter rather than number. A zone can be fed
 # input -> processing -> output, which leaves no direct input/output crosspoint for
 # the plain matrix lookup to find.
@@ -153,6 +169,41 @@ PROC_BLOCKS = "ABCDEFGH"
 # The unit reports gain to 0.01 dB; this is well under that, and far above the
 # rounding in db2linear that makes an exactly-at-ceiling channel read as just over 1.0.
 GAIN_CLAMP_TOLERANCE_DB = 0.005
+
+
+def _reported_level(entity, prop, where):
+    """A proportional gain, clamped to the 0..1 Home Assistant accepts.
+
+    getPropGain is a ratio against the channel's MAXGAIN, so a channel whose GAIN sits
+    above its own ceiling reports more than 1.0 - the invalid state that showed up on an
+    output as 2.371, a slider at 237%. Nothing in the integration can produce it: the
+    setters cannot express a value above 1.0. It comes from outside - G-Ware, the front
+    panel, or a raw `MAX <ch> I` through send_command dropping a ceiling under a level
+    that was already there.
+
+    Clamping the report keeps the entity valid without writing to the unit, but a silent
+    clamp would recreate exactly the blindness that made the output case hard to find:
+    a channel reading 1.0 while it is really at 1.4 is still the wrong number, just a
+    less alarming one. So the first crossing is logged, and the latch resets when the
+    channel comes back under its ceiling so a recurrence is reported again.
+    """
+    try:
+        value = float(prop)
+    except (TypeError, ValueError):
+        return prop
+    if value > 1.0 + GAIN_CLAMP_TOLERANCE_DB:
+        if not entity._above_ceiling:
+            entity._above_ceiling = True
+            _LOGGER.warning(
+                "%s: %s is %.2f dB above its own MAXGAIN; reporting the ceiling. Nothing "
+                "in this integration can set a level above it, so something else did - "
+                "G-Ware, the front panel, or a raw MAX write.",
+                entity, where, 20.0 * math.log10(value))
+        return 1.0
+    if entity._above_ceiling and value <= 1.0 + GAIN_CLAMP_TOLERANCE_DB:
+        entity._above_ceiling = False
+        _LOGGER.info("%s: %s is back under its MAXGAIN", entity, where)
+    return min(value, 1.0)
 
 SUPPORT_XAP_ZONE = (
     MPEF.VOLUME_MUTE | MPEF.VOLUME_SET |
@@ -175,6 +226,48 @@ SUPPORT_XAP_SOURCE = (
 # purpose, but a broad "turn the volume down" targeting an area sweeping up the inputs
 # along with the speakers.
 SUPPORT_XAP_SOURCE_WITH_GAIN = SUPPORT_XAP_SOURCE | MPEF.VOLUME_SET
+
+
+def parse_source_specs(srcs):
+    """Channel specs -> a list of input dicts.
+
+    Module level so the number platform reads the same parser the media_player entity
+    does. Two copies of this would drift, and a spec one accepted and the other did not
+    is a crash at setup rather than a config error.
+    """
+    inputs = []
+    for src in srcs:
+        inpdict = {'UNIT': 0, 'CHAN': None, 'BUS': None, 'BUSGRP': 'E', 'INPGRP': 'I'}
+        if issubclass(type(src), int):
+            inpdict['CHAN'] = src
+        elif issubclass(type(src), str):
+            if ":" in src:
+                comps = src.count(':')
+                if comps == 1:
+                    inpdict['UNIT'], inpdict['CHAN'] = src.split(":")
+                elif comps == 2:
+                    # BUSGRP already defaults to 'E' in inpdict above.
+                    inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'] = src.split(":")
+                elif comps == 3:
+                    inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'], inpdict['BUSGRP'] = src.split(":")
+                else:
+                    # Anything longer used to match no branch at all, leaving CHAN as
+                    # None until int(None) raised TypeError further down.
+                    raise Exception('Invalid Input String')
+                try:
+                    inpdict['CHAN'] = int(inpdict['CHAN'])
+                    inpdict['UNIT'] = int(inpdict['UNIT'])
+                except (TypeError, ValueError):
+                    raise Exception('Invalid Input String')
+            elif src.isdigit():
+                inpdict['CHAN'] = int(src)
+            else:
+                raise Exception('Invalid Input String')
+        else:
+            # shouldn't be able to get here
+            raise Exception('Invalid Source Input config format')
+        inputs.append(inpdict)
+    return inputs
 
 
 def handle_xap_exceptions(func):
@@ -555,6 +648,69 @@ async def _apply_max_gain(hass, xapconn, raw):
             _LOGGER.exception("Failed setting MAXGAIN on unit %s output %s", unit, chan)
 
 
+# Entities being refreshed, per config entry. Every platform in the entry feeds the same
+# list so there is exactly one timer per unit - two platforms each running their own would
+# tick independently and meet at the connection lock, which is the contention this exists
+# to avoid.
+POLL_KEY = f"{DOMAIN}_poll"
+
+
+def register_for_polling(hass, entry, entities):
+    """Add entities to this entry's refresh list, starting its timer on the first call.
+
+    Called by every platform. The list is mutated in place, so a platform that sets up
+    after the timer has started is picked up on the next tick without re-registering.
+
+    The period comes from the entry's own transport rather than a module-level
+    SCAN_INTERVAL: Home Assistant reads that once and it is global to the platform, so a
+    serial entry and a telnet entry in one install would be stuck with the same value.
+    Serial is a single port under one lock, where every poll competes with real commands;
+    telnet has no such contention.
+    """
+    store = hass.data.setdefault(POLL_KEY, {})
+    state = store.get(entry.entry_id)
+    if state is not None:
+        state["entities"].extend(entities)
+        return
+
+    conn_type = entry.data.get(CONF_CONNECTION_TYPE, "serial")
+    interval = SCAN_INTERVALS.get(conn_type, DEFAULT_SCAN_INTERVAL)
+    state = {"entities": list(entities), "running": False}
+    store[entry.entry_id] = state
+
+    async def _refresh(_now):
+        # Sequential, not gathered: these all end up behind the same connection lock, so
+        # issuing them together would only pile executor threads against it.
+        if state["running"]:
+            _LOGGER.debug("refresh still running after %s; skipping this tick", interval)
+            return
+        state["running"] = True
+        try:
+            for entity in list(state["entities"]):
+                if entity.hass is None or entity.entity_id is None:
+                    continue  # not added yet
+                try:
+                    await entity.async_update()
+                except Exception:  # noqa: BLE001 - one bad entity must not stop the rest
+                    _LOGGER.exception("Failed refreshing %s", entity)
+                    continue
+                entity.async_write_ha_state()
+        finally:
+            # In a finally so a tick that raises cannot latch polling off for good.
+            state["running"] = False
+
+    entry.async_on_unload(async_track_time_interval(hass, _refresh, interval))
+    def _forget():
+        # Must return None. Home Assistant schedules a truthy return value from an
+        # unload callback as a coroutine, and `lambda: store.pop(...)` returned the
+        # popped dict - which raised TypeError on the first reload and left the entry in
+        # failed_unload, taking every entity down until a restart (2026-09-18).
+        store.pop(entry.entry_id, None)
+
+    entry.async_on_unload(_forget)
+    _LOGGER.debug("Refreshing entry %s every %s over %s", entry.entry_id, interval, conn_type)
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up XAP Controller media player entities from a config entry."""
     sources = json.loads(entry.data[CONF_SOURCES])
@@ -577,6 +733,15 @@ async def async_setup_entry(hass, entry, async_add_entities):
             "a zone of [3, 4] with stereo off. See issue #23."
         )
     expose_gain = bool(entry.data.get(CONF_EXPOSE_SOURCE_GAIN, False))
+    if expose_gain:
+        # Superseded by the per-channel trim number entities, which reach the same gain
+        # without making it look like a volume to automations, Assist and the bridges.
+        _LOGGER.warning(
+            "The 'expose_source_gain' option is deprecated and will be removed in a "
+            "future release. Enable the 'Source: <name> trim' number entity for the "
+            "channel you want to adjust instead - it is per channel, in dB, and out of "
+            "reach of media_player.volume_set."
+        )
 
     # XAPX00.__init__ calls test_connection() internally, which uses
     # loop.run_until_complete() for telnet.  That must not run on HA's event
@@ -641,13 +806,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     await _prewarm_max_gain(hass, xapconn, zone_objs)
 
-    async_add_entities(source_objs + zone_objs)
+    entities = source_objs + zone_objs
+    async_add_entities(entities)
+    register_for_polling(hass, entry, entities)
 
 
 class XAPSource(MediaPlayerEntity):
     """
     Represents one source
     """
+
+    # Latched by _reported_level so a channel sitting above its own MAXGAIN is
+    # logged on the first crossing rather than on every poll.
+    _above_ceiling = False
+    # Refreshed by register_for_polling, so the period follows the entry's
+    # transport instead of one module-wide constant shared by both.
+    _attr_should_poll = False
 
     def __init__(self, hass, xapconn, source_name, source_inputs, unitCode=0,
                  expose_gain=False):
@@ -657,7 +831,6 @@ class XAPSource(MediaPlayerEntity):
         self._name = source_name
         self._xapx00 = xapconn
         self._expose_gain = expose_gain
-        self._state = STATE_OFF
         self.xunit = 0
         self.xinput = None
         self.xgroup = "I"
@@ -667,7 +840,7 @@ class XAPSource(MediaPlayerEntity):
         self.parse_source(source_inputs)
         self.numChannels = len(self._inputs)
         self._volume = 0
-        self._isMuted = 1
+        self._isMuted = 1  # which is also "off" - see the state property
         self._first_connect = 0
         channels = ",".join(str(i) for i in source_inputs)
         self._attr_unique_id = f"XAP-Source-{self._xapx00.conn_id}-{channels}"
@@ -703,13 +876,13 @@ class XAPSource(MediaPlayerEntity):
     async def _firstConnect(self):
         if self._first_connect:
             return
+        # Read only. This used to write the level straight back "to make sure synced",
+        # which on a multi-input source wrote input 0's trim to every other input - so a
+        # pair deliberately trimmed apart for channel balance lost that on every startup,
+        # silently, because the write succeeded and the entity agreed with what it wrote.
+        # The unit is the authority at startup; there is nothing here to sync it to.
         self._volume = await self._get_volume_level()
-        await self.async_set_volume_level(self._volume)  # make sure synced
         await self._get_mute_status()
-        if self._isMuted:
-            self._state = STATE_OFF
-        else:
-            self._state = STATE_ON
         await self.async_mute_volume(self._isMuted)  # sync
         self._first_connect = 1
         _LOGGER.debug('%s: firstConnect complete' % self._name)
@@ -717,42 +890,11 @@ class XAPSource(MediaPlayerEntity):
     def _startOffline(self):
         self._volume = 0
         self._isMuted = 1
-        self._state = STATE_OFF
         _LOGGER.debug('%s: startOffline complete' % self._name)
 
     def parse_source(self, srcs):
         "Split into input unit, input #, expansion bus, expansion bus group"
-        for src in srcs:
-            inpdict={'UNIT':0,'CHAN':None,'BUS':None, 'BUSGRP':'E', 'INPGRP':'I'}
-            if issubclass(type(src), int):
-                inpdict['CHAN'] = src
-            elif issubclass(type(src), str):
-                if ":" in src:
-                    comps = src.count(':')
-                    if comps == 1:
-                        inpdict['UNIT'], inpdict['CHAN']  =  src.split(":")
-                    elif comps == 2:
-                        # BUSGRP already defaults to 'E' in inpdict above.
-                        inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'] = src.split(":")
-                    elif comps == 3:
-                        inpdict['UNIT'], inpdict['CHAN'], inpdict['BUS'], inpdict['BUSGRP'] = src.split(":")
-                    else:
-                        # Anything longer used to match no branch at all, leaving CHAN as
-                        # None until int(None) raised TypeError further down.
-                        raise Exception('Invalid Input String')
-                    try:
-                        inpdict['CHAN'] = int(inpdict['CHAN'])
-                        inpdict['UNIT'] = int(inpdict['UNIT'])
-                    except (TypeError, ValueError):
-                        raise Exception('Invalid Input String')
-                elif src.isdigit():
-                    inpdict['CHAN'] = int(src)
-                else:
-                    raise Exception('Invalid Input String')
-            else:
-                # shouldn't be able to get here
-                raise Exception('Invalid Source Input config format')
-            self._inputs.append(inpdict)
+        self._inputs.extend(parse_source_specs(srcs))
         return
 
     def getSource(self, outUnit, srcNum=0):
@@ -772,8 +914,22 @@ class XAPSource(MediaPlayerEntity):
 
     @property
     def state(self):
-        """Return the state of the device."""
-        return self._state
+        """Off exactly when the inputs are muted.
+
+        A source has no power of its own: turn_off mutes its inputs, turn_on unmutes
+        them, and the refresh reads on/off back from the mute. This used to be a separate
+        `_state` that every path but one kept in step - volume_mute changed the mute and
+        left `_state` alone. So a mute published "on" with is_volume_muted true, the next
+        tick flipped it to "off", and an unmute after that tick published "off" for up to
+        a whole refresh period while the input was plainly live. Derived, the two cannot
+        disagree.
+
+        The consequence to know when reading it: Home Assistant drops every media
+        attribute, is_volume_muted included, from a player that is off. A muted source
+        therefore shows as state "off" with no is_volume_muted at all; test the state,
+        not the attribute.
+        """
+        return STATE_OFF if self._isMuted else STATE_ON
 
     @property
     def supported_features(self):
@@ -799,8 +955,24 @@ class XAPSource(MediaPlayerEntity):
         gain = await self._xap(
             lambda: self._xapx00.getPropGain(vinp['CHAN'], group="I", unitCode=vinp['UNIT'])
         )
-        self._volume = gain
+        self._volume = _reported_level(self, gain, f"input {vinp['UNIT']}:{vinp['CHAN']}")
         return self._volume
+
+    def _publish(self):
+        """Push in-memory state into Home Assistant's state machine.
+
+        Needed on every setter because these entities do not self-poll, and
+        `entity_service_call` only writes state back after a service when `should_poll`
+        is true. Without it a setter updates `self._volume` and the state machine keeps
+        the old value until the next refresh tick - a dashboard slider springs back after
+        being dragged, and an automation that selects a source then reads it gets the
+        previous one.
+
+        Guarded because the setters are also called from _firstConnect and _startOffline,
+        and writing state before the entity is added raises.
+        """
+        if self.hass is not None and self.entity_id is not None:
+            self.async_write_ha_state()
 
     @handle_xap_exceptions
     async def async_set_volume_level(self, volume):
@@ -822,6 +994,7 @@ class XAPSource(MediaPlayerEntity):
             if landed is None:
                 landed = result
         self._volume = volume if landed is None else landed
+        self._publish()
 
     @handle_xap_exceptions
     async def async_mute_volume(self, mute=2):
@@ -835,6 +1008,7 @@ class XAPSource(MediaPlayerEntity):
                 lambda s=s: self._xapx00.setMute(s['CHAN'], group="I",
                                                  isMuted=self._isMuted, unitCode=s['UNIT'])
             )
+        self._publish()
 
     @handle_xap_exceptions
     async def _get_mute_status(self):
@@ -853,12 +1027,10 @@ class XAPSource(MediaPlayerEntity):
         if not self._first_connect:
             await self._firstConnect()
         await self.async_mute_volume(mute=0)
-        self._state = STATE_ON
 
     async def async_turn_off(self):
         """Turn off media player."""
         await self.async_mute_volume(mute=1)
-        self._state = STATE_OFF
 
     async def async_update(self):
         """Re-read level and mute from the unit.
@@ -867,20 +1039,26 @@ class XAPSource(MediaPlayerEntity):
         `_firstConnect` cached at setup. Anything that changed the unit afterwards - the
         front panel, G-Ware, a serial command - left the entity stale indefinitely, and
         a source showing "off" while its channel was plainly unmuted is a confusing
-        place to start debugging silence. Zones already polled; this brings sources into
-        line.
+        place to start debugging silence.
         """
         if not self.connectionLive():
             return
         await self._get_volume_level()
         await self._get_mute_status()
-        self._state = STATE_OFF if self._isMuted else STATE_ON
 
 
 class XAPZone(MediaPlayerEntity):
     """
     Represents one or more XAP outputs, either mono or stereo
     """
+
+    # Latched by _reported_level so a channel sitting above its own MAXGAIN is
+    # logged on the first crossing rather than on every poll.
+    _above_ceiling = False
+    # Refreshed by register_for_polling, so the period follows the entry's
+    # transport instead of one module-wide constant shared by both.
+    _attr_should_poll = False
+
     def __init__(self, hass, xapconn, sources, zone_name, outputs, unitCode=0):
         """Initialise the XAPX00 zone pseudo-device"""
         self.hass = hass
@@ -986,7 +1164,47 @@ class XAPZone(MediaPlayerEntity):
             raise Exception('Invalid Output String')
 
     async def async_update(self):
-        pass  # can't be changed except by us, so can track state without calls
+        """Re-read mute and level from the unit.
+
+        This was `pass`, on the grounds that nothing but this integration could change a
+        zone. That stopped being true: send_command sends a raw `MUTE 5 O 1`, and G-Ware
+        and the front panel reach the unit too. Unlike a source, where muted means off, a
+        zone's on/off comes from routing, so a zone muted from outside stayed "on" with
+        is_volume_muted false - silent while reporting itself on and unmuted.
+
+        Two queries per zone per tick, both on the first output, which is the channel
+        the getters and setters already report: one MUTE, and one GAIN (getPropGain's
+        MAXGAIN comes from XAPX00's cache, warmed at setup).
+
+        Routing is deliberately not re-read. `_get_source` costs one MTRX per configured
+        source until it finds a live crosspoint, so a zone that is off - the usual case -
+        pays for every source on every tick, zones x sources in all. And routing decides
+        on/off, which re-reading needs more than a call here to get right: `_get_source`
+        keeps the previous source when nothing is routed, so a zone switched off from
+        outside would never read as off; and turn_on publishes "on" even with no source to
+        restore, which a routing tick would flip back to "off" - the setter/tick
+        disagreement XAPSource.state is derived to avoid.
+        """
+        if not self.connectionLive():
+            return
+        await self._get_mute_status()
+        await self._get_volume_level()
+
+    def _publish(self):
+        """Push in-memory state into Home Assistant's state machine.
+
+        Needed on every setter because these entities do not self-poll, and
+        `entity_service_call` only writes state back after a service when `should_poll`
+        is true. Without it a setter updates `self._volume` and the state machine keeps
+        the old value until the next refresh tick - a dashboard slider springs back after
+        being dragged, and an automation that selects a source then reads it gets the
+        previous one.
+
+        Guarded because the setters are also called from _firstConnect and _startOffline,
+        and writing state before the entity is added raises.
+        """
+        if self.hass is not None and self.entity_id is not None:
+            self.async_write_ha_state()
 
     @handle_xap_exceptions
     async def async_select_source(self, source):
@@ -1024,6 +1242,7 @@ class XAPZone(MediaPlayerEntity):
                 self._poweroff_source = source
             cnt += 1
         self._active_source = source
+        self._publish()
 
     @handle_xap_exceptions
     async def _feeding_block(self, XOUT, XUNIT):
@@ -1134,6 +1353,7 @@ class XAPZone(MediaPlayerEntity):
         await self.async_select_source(self._poweroff_source)        
         await self.async_mute_volume(mute=0)
         self._state = STATE_ON
+        self._publish()
 
     async def async_turn_off(self):
         """Turn off zone"""
@@ -1146,6 +1366,7 @@ class XAPZone(MediaPlayerEntity):
         await self.async_mute_volume(mute=1)
         await self.async_select_source(SRC_OFF)
         self._state = STATE_OFF
+        self._publish()
 
     @handle_xap_exceptions
     async def async_mute_volume(self, mute=2):
@@ -1162,6 +1383,7 @@ class XAPZone(MediaPlayerEntity):
                     self._xapx00.setMute(XOUT, group="O", isMuted=int(muted), unitCode=XUNIT)
             )
         self._isMuted = bool(muted)
+        self._publish()
 
     @handle_xap_exceptions
     async def _get_mute_status(self):
@@ -1198,6 +1420,7 @@ class XAPZone(MediaPlayerEntity):
                 # surprising of the available wrong answers.
                 reported = landed
         self._volume = reported
+        self._publish()
 
     @handle_xap_exceptions
     async def _get_volume_level(self):
@@ -1207,7 +1430,7 @@ class XAPZone(MediaPlayerEntity):
         gain = await self._xap(
             lambda: self._xapx00.getPropGain(XOUT, group="O", unitCode=XUNIT)
         )
-        self._volume = gain
+        self._volume = _reported_level(self, gain, f"output {XUNIT}:{XOUT}")
         return self._volume
 
     async def _sync_volume_level(self):
